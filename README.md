@@ -6,6 +6,7 @@ IFT-6163 Project
 ```
 python3.10 -m venv venv
 source venv/bin/activate
+python3.10 -m pip install -U pip setuptools wheel
 pip install -r requirements.txt
 ```
 
