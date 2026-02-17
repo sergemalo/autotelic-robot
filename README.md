@@ -1,37 +1,40 @@
 # Autotelic Robot
 IFT-6163 Project
 
-## Python version
-I strongly suggest we stick to Python 3.10.x.  
+## Linux prerequisites
+I strongly suggest we stick to Python 3.10
+```
+sudo apt-get update
+sudo apt-get install -y cmake build-essential
+sudo apt install python3.10 python3.10-venv python3.10-dev
+```
 
 ## How to prepare your venv
 I have created a requirements.txt file that integrates all python lib dependencies for Pytorch and LIBERO. You simply need to install them with the following commands:
-
-
-## Python virtual environment setup
 ```
 python3.10 -m venv venv
 source venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
 ## LIBERO
-1. Clone the Montreal fork,
+1. Clone the Montreal fork:
 ```
 git clone https://github.com/montrealrobotics/LIBERO
 ```
-2. Install it
+2. Install it:
 ```
 cd LIBERO/
 touch libero/__init__.py
 touch libero/libero/__init__.py
 pip install -e .
 ```
-3. Download LIBERO Datasets
+3. Download one LIBERO Dataset:
 ```
-python3.10 benchmark_scripts/download_libero_datasets.py --use-huggingface
+python3.10 benchmark_scripts/download_libero_datasets.py --datasets libero_spatial --use-huggingface
 ```
-4. Setup LIBERO Macros
+4. Setup LIBERO Macros:
 ```
 cd ..
 python3.10 venv/lib/python3.10/site-packages/robosuite/scripts/setup_macros.py
