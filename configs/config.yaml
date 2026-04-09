@@ -1,0 +1,21 @@
+defaults:
+  - encoder: r3m
+  - reward: privileged
+  - agent: sac
+  - replay_buffer: default
+  - env: libero
+  - wandb: default
+  - _self_
+
+seed: 42
+device: cuda
+
+checkpoint_dir: checkpoints/
+checkpoint_freq: 10000        # save every N env steps
+
+total_env_steps: 500000
+eval_freq: 5000               # eval every N env steps
+eval_episodes: 10
+
+# logging
+log_level: INFO               # DEBUG, INFO, WARNING, ERROR

@@ -1,0 +1,8 @@
+# @package _global_.wandb
+enabled: true
+project: rig-libero
+entity: null                  # set to your wandb username/team
+group: null                   # optional run grouping
+tags: []
+log_freq: 1000                # log scalars every N env steps
+log_image_freq: 10000         # log goal/achieved images every N steps

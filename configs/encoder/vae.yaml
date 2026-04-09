@@ -1,0 +1,14 @@
+# @package _global_.encoder
+name: vae
+latent_dim: 64
+camera_key: agentview_image
+# VAE architecture
+encoder_channels: [32, 64, 128, 256]
+decoder_channels: [256, 128, 64, 32]
+beta: 5                      # beta-VAE weight (1–10 effective)
+# training
+vae_lr: 1.0e-3
+vae_batch_size: 128
+vae_train_freq: 3000         # retrain every N env steps
+vae_train_steps: 200         # gradient steps per retraining
+freeze: false                # VAE is trained online

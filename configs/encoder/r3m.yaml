@@ -1,0 +1,6 @@
+# @package _global_.encoder
+name: r3m
+model_name: resnet50        # resnet18, resnet34, resnet50
+freeze: true
+camera_key: agentview_image  # which image from obs dict to use
+latent_dim: 2048             # resnet50 → 2048, resnet18/34 → 512

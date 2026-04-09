@@ -1,0 +1,8 @@
+# @package _global_.reward
+name: privileged
+# Key in the obs dict that gives the target object position (3D xyz).
+# Override per task as needed.
+object_pos_key: "akita_black_bowl_1_pos"          # e.g. "akita_black_bowl_1_pos" — must be set
+reward_scale: 1.0
+reward_type: negative_distance  # negative_distance | sparse
+sparse_threshold: 0.05        # only used when reward_type: sparse
