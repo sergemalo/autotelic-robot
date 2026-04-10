@@ -93,8 +93,10 @@ def main(cfg: DictConfig):
         ep_return = 0.0
         done = False
         ep_frames = []
+        ep_step = 0
+        max_steps = cfg.env.episode_length
 
-        while not done:
+        while not done and ep_step < max_steps:
             z = encoder.encode(_single_obs(obs))
             z_goal = encoder.encode(_single_obs(goal_obs))
             action = agent.select_action(z, z_goal, deterministic=True)
@@ -111,6 +113,7 @@ def main(cfg: DictConfig):
             ep_return += r
             ep_frames.append(obs[cfg.encoder.camera_key].copy())
             obs = next_obs
+            ep_step += 1
 
         z_final = encoder.encode(_single_obs(obs))
         z_goal_t = encoder.encode(_single_obs(goal_obs))

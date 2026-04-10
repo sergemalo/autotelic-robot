@@ -13,8 +13,8 @@ device: cuda
 checkpoint_dir: checkpoints/
 checkpoint_freq: 10000        # save every N env steps
 
-total_env_steps: 500000
-eval_freq: 5000               # eval every N env steps
+total_env_steps: 2000
+eval_freq: 500               # eval every N env steps
 eval_episodes: 10
 
 # logging

@@ -5,11 +5,14 @@ Entry point: train.py calls trainer.train(cfg)
 """
 import logging
 import os
-from typing import Optional
+from typing import List, Optional
+import tqdm
 
+import imageio
 import numpy as np
 import torch
 from omegaconf import DictConfig
+from PIL import Image
 
 from agents import make_agent
 from agents.sac import SACAgent
@@ -84,8 +87,9 @@ class Trainer:
         episode_return = 0.0
         episode_steps = 0
 
-        while self.total_steps < self.cfg.total_env_steps:
+        while tqdm.tqdm(self.total_steps < self.cfg.total_env_steps):
 
+            logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
             # ---- Encode current obs and goal -------------------------
             z = self.encoder.encode(self._single_obs(obs))
             z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
@@ -191,8 +195,22 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def evaluate(self) -> dict:
-        """Run cfg.eval_episodes deterministic episodes and return metrics."""
+        """
+        Run cfg.eval_episodes deterministic episodes and return metrics.
+
+        For each episode, saves:
+          - <eval_dir>/step_<N>/ep_<E>_goal.png   — the goal image
+          - <eval_dir>/step_<N>/ep_<E>_rollout.mp4 — the full episode video
+        """
         logger.info("Evaluating for %d episodes...", self.cfg.eval_episodes)
+
+        # Create output directory for this eval checkpoint
+        eval_dir = os.path.join(
+            self.cfg.checkpoint_dir, "eval", f"step_{self.total_steps}"
+        )
+        os.makedirs(eval_dir, exist_ok=True)
+        logger.info("Saving eval visuals to: %s", eval_dir)
+
         successes, returns, distances = [], [], []
 
         for ep in range(self.cfg.eval_episodes):
@@ -200,29 +218,67 @@ class Trainer:
             goal_obs = self._sample_goal_obs()
             ep_return = 0.0
             done = False
+            ep_step = 0
+            max_steps = self.cfg.env.episode_length
+            frames: List[np.ndarray] = []
 
-            while not done:
+            # ---- Save goal image ------------------------------------
+            goal_img = goal_obs[self.cfg.encoder.camera_key]  # (H, W, 3) uint8
+            goal_path = os.path.join(eval_dir, f"ep_{ep:03d}_goal.png")
+            Image.fromarray(goal_img).save(goal_path)
+            logger.debug("Goal image saved: %s", goal_path)
+
+            # ---- Roll out episode -----------------------------------
+            while not done and ep_step < max_steps:
+                # Capture frame before stepping (shows state at this step)
+                frames.append(obs[self.cfg.encoder.camera_key].copy())
+
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
                 action = self.agent.select_action(z, z_goal, deterministic=True)
-                obs, _, done, _ = self.env.step(action)
+                next_obs, _, done, _ = self.env.step(action)
+
                 r = self.reward_fn.compute(
                     obs=obs,
-                    next_obs=obs,
+                    next_obs=next_obs,
                     goal_obs=goal_obs,
                     z=z,
-                    z_next=z,
+                    z_next=self.encoder.encode(self._single_obs(next_obs)),
                     z_goal=z_goal,
                 )
                 ep_return += r
+                ep_step += 1
+                obs = next_obs
 
+            # Capture the final frame
+            frames.append(obs[self.cfg.encoder.camera_key].copy())
+
+            # ---- Save episode video ---------------------------------
+            video_path = os.path.join(eval_dir, f"ep_{ep:03d}_rollout.mp4")
+            self._save_video(frames, video_path)
+
+            # ---- Metrics --------------------------------------------
             z_final = self.encoder.encode(self._single_obs(obs))
-            z_goal = self.encoder.encode(self._single_obs(goal_obs))
-            dist = float(torch.norm(z_final - z_goal).item())
+            z_goal_t = self.encoder.encode(self._single_obs(goal_obs))
+            dist = float(torch.norm(z_final - z_goal_t).item())
+            success = self.env.check_success()
 
-            successes.append(float(self.env.check_success()))
+            successes.append(float(success))
             returns.append(ep_return)
             distances.append(dist)
+
+            logger.info(
+                "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s",
+                ep + 1, self.cfg.eval_episodes,
+                ep_step, ep_return, dist, success,
+            )
+
+            # ---- Log to WandB ---------------------------------------
+            self.wandb.log_images(
+                step=self.total_steps,
+                goal_image=goal_img,
+                achieved_image=obs[self.cfg.encoder.camera_key],
+            )
 
         metrics = {
             "eval/success_rate": float(np.mean(successes)),
@@ -230,12 +286,35 @@ class Trainer:
             "eval/mean_latent_distance": float(np.mean(distances)),
         }
         logger.info(
-            "Eval | success=%.2f | return=%.3f | dist=%.4f",
+            "Eval complete | success=%.2f | return=%.3f | dist=%.4f",
             metrics["eval/success_rate"],
             metrics["eval/mean_return"],
             metrics["eval/mean_latent_distance"],
         )
         return metrics
+
+    # ------------------------------------------------------------------
+    # Visual output helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _save_video(frames: List[np.ndarray], path: str, fps: int = 20):
+        """
+        Write a list of uint8 (H, W, 3) frames to an MP4 file.
+
+        Args:
+            frames: list of numpy arrays, each (H, W, 3) uint8
+            path:   output file path (must end in .mp4)
+            fps:    playback frame rate
+        """
+        if not frames:
+            logger.warning("No frames to save for video: %s", path)
+            return
+        writer = imageio.get_writer(path, fps=fps, codec="libx264", quality=7)
+        for frame in frames:
+            writer.append_data(frame)
+        writer.close()
+        logger.debug("Video saved: %s (%d frames @ %d fps)", path, len(frames), fps)
 
     # ------------------------------------------------------------------
     # Helpers
