@@ -9,6 +9,7 @@ import random
 from pathlib import Path
 import matplotlib.pyplot as plt
 from PIL import Image
+import os
 
 class LIBEROStateSampler:
     """
@@ -210,7 +211,8 @@ def main():
     print("="*80)
     sample1 = sampler.sample_start_goal_states(min_distance=5, goal_after_start=True)
     sampler.print_sample_info(sample1)
-    sampler.visualize_start_goal(sample1, save_path="start_goal_example1.png")
+    os.mkdir("state_samples_visualizations", exist_ok=True)
+    sampler.visualize_start_goal(sample1, save_path="state_samples_visualizations/start_goal_example1.png")
     
     # Example 2: Goal can be any state
     print("\n" + "="*80)
