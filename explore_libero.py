@@ -16,7 +16,7 @@ logger      = logging.getLogger(__name__)
 date_prefix = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 output_dir  = f"output/{date_prefix}_explore_libero"
 log_file    = f"{output_dir}/run.log"
-os.mkdir(output_dir, exist_ok=True) # Create parent output directory if it doesn't exist
+os.makedirs(output_dir, exist_ok=True) # Create parent output directory if it doesn't exist
 
 
 def init_logging(log_level: str):
