@@ -54,7 +54,7 @@ class LIBEROStateSampler:
         
         traj_length = self.get_trajectory_length(demo_name)
         
-        # Sample start state
+        # Sample start state and goal state indices
         if goal_after_start:
             # Start must leave room for goal
             max_start = traj_length - min_distance - 1
@@ -201,7 +201,7 @@ def main():
         print("Please update the dataset_path variable.")
         return
     
-    # Create sampler
+    # Create sampler and load dataset
     sampler = LIBEROStateSampler(dataset_path)
     
     # Example 1: Sample with goal always after start
@@ -220,15 +220,7 @@ def main():
     sampler.print_sample_info(sample2)
     sampler.visualize_start_goal(sample2, save_path="start_goal_example2.png")
     
-    # Example 3: Multiple samples from same trajectory
-    print("\n" + "="*80)
-    print("Example 3: Multiple samples from the same trajectory")
-    print("="*80)
-    demo_name = sampler.sample_trajectory()
-    for i in range(3):
-        print(f"\nSample {i+1}:")
-        sample = sampler.sample_start_goal_states(demo_name=demo_name, min_distance=3)
-        print(f"  Start: {sample['start_idx']}, Goal: {sample['goal_idx']}, Distance: {sample['distance']}")
+   
 
 if __name__ == "__main__":
     main()
