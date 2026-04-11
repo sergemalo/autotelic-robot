@@ -77,9 +77,9 @@ def get_random_trajectory(hdf5_path):
         print(f"\nSelected random trajectory: {random_demo}")
         return random_demo
 
-def visualize_trajectory(hdf5_path, demo_name, output_dir="trajectory_frames", save_video=True):
+def visualize_trajectory(hdf5_path, demo_name, output_dir="output/trajectory_samples", save_video=True):
     """
-    Visualize a trajectory by extracting and displaying frames
+    Visualize a trajectory by extracting frames
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -108,7 +108,7 @@ def visualize_trajectory(hdf5_path, demo_name, output_dir="trajectory_frames", s
         print(f"Image dtype: {images.dtype}")
         print(f"Image range: [{images.min()}, {images.max()}]")
         
-        # Save frames
+        # Extract frames
         frames = []
         for i in range(min(traj_length, len(images))):
             img = images[i]
@@ -121,43 +121,21 @@ def visualize_trajectory(hdf5_path, demo_name, output_dir="trajectory_frames", s
                 img_normalized = ((img - img.min()) / (img.max() - img.min()) * 255).astype(np.uint8)
                 img_pil = Image.fromarray(img_normalized)
             
-            # Save frame
-            frame_path = os.path.join(output_dir, f"frame_{i:04d}.png")
-            img_pil.save(frame_path)
+           
             frames.append(np.array(img_pil))
             
-            # Display some key frames
-            if i in [0, traj_length//4, traj_length//2, 3*traj_length//4, traj_length-1]:
-                print(f"Saved frame {i}/{traj_length-1}")
-        
-        print(f"\nSaved {len(frames)} frames to {output_dir}/")
         
         # Create a video using imageio
         if save_video:
             try:
                 import imageio
-                video_path = os.path.join(output_dir, "trajectory.mp4")
+                video_path = os.path.join(output_dir, f"trajectory_{demo_name}.mp4")
                 imageio.mimsave(video_path, frames, fps=10)
                 print(f"Saved video to {video_path}")
             except ImportError:
                 print("imageio not available for video creation. Install with: pip install imageio[ffmpeg]")
         
-        # Display a grid of key frames
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        axes = axes.flatten()
-        
-        key_frames = [0, traj_length//5, 2*traj_length//5, 3*traj_length//5, 4*traj_length//5, traj_length-1]
-        for idx, frame_idx in enumerate(key_frames):
-            if frame_idx < len(frames):
-                axes[idx].imshow(frames[frame_idx])
-                axes[idx].set_title(f"Step {frame_idx}/{traj_length-1}")
-                axes[idx].axis('off')
-        
-        plt.tight_layout()
-        grid_path = os.path.join(output_dir, "trajectory_grid.png")
-        plt.savefig(grid_path, dpi=150, bbox_inches='tight')
-        print(f"Saved frame grid to {grid_path}")
-        plt.close()
+
         
         return frames
 

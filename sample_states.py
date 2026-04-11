@@ -204,6 +204,8 @@ def main():
     
     # Create sampler and load dataset
     sampler = LIBEROStateSampler(dataset_path)
+
+    os.makedirs("output/state_samples_visualizations", exist_ok=True)
     
     # Example 1: Sample with goal always after start
     print("\n" + "="*80)
@@ -211,8 +213,7 @@ def main():
     print("="*80)
     sample1 = sampler.sample_start_goal_states(min_distance=5, goal_after_start=True)
     sampler.print_sample_info(sample1)
-    os.mkdir("state_samples_visualizations", exist_ok=True)
-    sampler.visualize_start_goal(sample1, save_path="state_samples_visualizations/start_goal_example1.png")
+    sampler.visualize_start_goal(sample1, save_path="output/state_samples_visualizations/start_goal_example1.png")
     
     # Example 2: Goal can be any state
     print("\n" + "="*80)
@@ -220,9 +221,8 @@ def main():
     print("="*80)
     sample2 = sampler.sample_start_goal_states(min_distance=10, goal_after_start=False)
     sampler.print_sample_info(sample2)
-    sampler.visualize_start_goal(sample2, save_path="start_goal_example2.png")
+    sampler.visualize_start_goal(sample2, save_path="output/state_samples_visualizations/start_goal_example2.png")
     
-   
 
 if __name__ == "__main__":
     main()
