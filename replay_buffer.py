@@ -45,7 +45,9 @@ class ReplayBuffer:
 
         # Storage — populated lazily on first push
         self._obs: Optional[Dict[str, np.ndarray]] = None
+        self._z: Optional[torch.Tensor] = None
         self._next_obs: Optional[Dict[str, np.ndarray]] = None
+        self._next_z: Optional[torch.Tensor] = None
         self._actions: Optional[np.ndarray] = None
         self._rewards: Optional[np.ndarray] = None
         self._dones: Optional[np.ndarray] = None
@@ -71,6 +73,10 @@ class ReplayBuffer:
 
     def _init_storage(self, obs: Dict[str, np.ndarray], action: np.ndarray):
         """Allocate storage arrays on first push."""
+        # For z and next_z, we have tensors of size latent_dim on the GPU, so we will store them as tensors directly rather than numpy arrays.
+        self._z = [None] * self.capacity
+        self._next_z = [None] * self.capacity
+
         self._actions = np.zeros((self.capacity, action.shape[0]), dtype=np.float32)
         self._rewards = np.zeros((self.capacity, 1), dtype=np.float32)
         self._dones = np.zeros((self.capacity, 1), dtype=np.float32)
@@ -95,8 +101,10 @@ class ReplayBuffer:
     def push(
         self,
         obs: Dict[str, np.ndarray],
+        z: torch.Tensor,
         action: np.ndarray,
         next_obs: Dict[str, np.ndarray],
+        next_z: torch.Tensor,
         reward: float,
         done: bool,
         step_in_ep: int,
@@ -111,6 +119,8 @@ class ReplayBuffer:
             self._obs[key][idx] = obs[key]
             self._next_obs[key][idx] = next_obs[key]
 
+        self._z[idx] = z.squeeze(0)
+        self._next_z[idx] = next_z.squeeze(0)
         self._actions[idx] = action
         self._rewards[idx] = reward
         self._dones[idx] = float(done)
@@ -145,7 +155,6 @@ class ReplayBuffer:
     def sample(
         self,
         batch_size: int,
-        encoder,          # BaseEncoder — used to encode goal images
         device: torch.device,
     ) -> Tuple[
         torch.Tensor,  # z        (B, latent_dim)
@@ -162,23 +171,20 @@ class ReplayBuffer:
 
         idxs = np.random.randint(0, self._size, size=batch_size)
 
-        obs_batch = {k: self._obs[k][idxs] for k in self._obs}
-        next_obs_batch = {k: self._next_obs[k][idxs] for k in self._next_obs}
+        # Copy z tensors to [b][latent_dim]
+        z_batch = torch.stack([self._z[i] for i in idxs])
+        next_z_batch = torch.stack([self._next_z[i] for i in idxs])
         actions = torch.FloatTensor(self._actions[idxs]).to(device)
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
         dones = torch.FloatTensor(self._dones[idxs]).to(device)
 
         # Sample goal obs according to strategy
-        goal_obs_batch = self._sample_goals(idxs)
+        z_goal_batch, goal_obs_batch = self._sample_goals(idxs)
 
         # Encode
-        z = encoder.encode(obs_batch)
-        z_next = encoder.encode(next_obs_batch)
-        z_goal = encoder.encode(goal_obs_batch)
+        return z_batch, actions, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch
 
-        return z, actions, z_next, rewards, dones, z_goal, goal_obs_batch
-
-    def _sample_goals(self, idxs: np.ndarray) -> Dict[str, np.ndarray]:
+    def _sample_goals(self, idxs: np.ndarray) -> Tuple[torch.Tensor, Dict[str, np.ndarray]]:
         """
         For each transition index, sample a goal observation.
         Returns a batched obs dict.
@@ -198,7 +204,9 @@ class ReplayBuffer:
             buffer_idxs = np.random.randint(0, self._size, size=batch_size)
             goal_idxs = np.where(use_future, future_idxs, buffer_idxs)
 
-        return {k: self._next_obs[k][goal_idxs] for k in self._next_obs}
+        z_goal_batch = torch.stack([self._z[i] for i in goal_idxs])
+        goal_obs_batch = {k: self._next_obs[k][goal_idxs] for k in self._next_obs}
+        return z_goal_batch, goal_obs_batch
 
     def _sample_future_goals(self, idxs: np.ndarray) -> np.ndarray:
         """

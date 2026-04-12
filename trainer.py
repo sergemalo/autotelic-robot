@@ -6,7 +6,7 @@ Entry point: train.py calls trainer.train(cfg)
 import logging
 import os
 from typing import List, Optional
-import tqdm
+from tqdm import tqdm
 
 import imageio
 import numpy as np
@@ -84,14 +84,15 @@ class Trainer:
         # Set a goal for the first episode
         self._goal_obs = self._sample_goal_obs()
         obs = self.env.reset()
+        z = self.encoder.encode(self._single_obs(obs))
         episode_return = 0.0
         episode_steps = 0
 
-        while tqdm.tqdm(self.total_steps < self.cfg.total_env_steps):
+        pbar = tqdm(total=self.cfg.total_env_steps, desc="Training")
+        while self.total_steps < self.cfg.total_env_steps:
 
-            logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
+            #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
             # ---- Encode current obs and goal -------------------------
-            z = self.encoder.encode(self._single_obs(obs))
             z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
 
             # ---- Select action ---------------------------------------
@@ -116,8 +117,10 @@ class Trainer:
             # ---- Store transition -----------------------------------
             self.buffer.push(
                 obs=obs,
+                z=z,
                 action=action,
                 next_obs=next_obs,
+                next_z=z_next,
                 reward=reward,
                 done=done,
                 step_in_ep=episode_steps,
@@ -126,14 +129,20 @@ class Trainer:
             episode_return += reward
             episode_steps += 1
             self.total_steps += 1
+            pbar.update(1)
 
             obs = next_obs
+            z = z_next
 
             # ---- SAC update -----------------------------------------
+            #logger.info("SAC update")
+
             for _ in range(self.cfg.agent.updates_per_step):
                 if len(self.buffer) >= self.cfg.agent.batch_size:
                     metrics = self._update()
                     self.wandb.log_scalar(metrics, self.total_steps)
+
+            #logger.info("SAC update DONE")
 
             # ---- Episode end ----------------------------------------
             if done:
@@ -168,8 +177,10 @@ class Trainer:
 
                 # Reset for next episode
                 self.episode_num += 1
+
                 self._goal_obs = self._sample_goal_obs()
                 obs = self.env.reset()
+                z = self.encoder.encode(self._single_obs(obs))
                 episode_return = 0.0
                 episode_steps = 0
 
@@ -325,7 +336,6 @@ class Trainer:
         z, actions, z_next, rewards, dones, z_goal, goal_obs_batch = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
-                encoder=self.encoder,
                 device=self.device,
             )
 
@@ -366,18 +376,22 @@ class Trainer:
 
     def _warmup(self, obs: dict):
         """Collect random transitions to seed the replay buffer."""
-        goal_obs = self._random_goal_obs(obs)
+        #goal_obs = self._random_goal_obs(obs)
         step_in_ep = 0
 
-        for _ in range(self.cfg.agent.warmup_steps):
+        for _ in tqdm(range(self.cfg.agent.warmup_steps)):
             action = np.random.uniform(-1, 1, size=self.env.action_dim)
             next_obs, _, done, _ = self.env.step(action)
 
             # Dummy zero reward during warmup — buffer is just being seeded
+            z = self.encoder.encode(self._single_obs(obs))
+            z_next = self.encoder.encode(self._single_obs(next_obs))
             self.buffer.push(
                 obs=obs,
+                z=z,
                 action=action,
                 next_obs=next_obs,
+                next_z=z_next,
                 reward=0.0,
                 done=done,
                 step_in_ep=step_in_ep,
@@ -387,7 +401,7 @@ class Trainer:
             if done:
                 self.buffer.end_episode()
                 obs = self.env.reset()
-                goal_obs = self._random_goal_obs(obs)
+                #goal_obs = self._random_goal_obs(obs)
                 step_in_ep = 0
             else:
                 obs = next_obs

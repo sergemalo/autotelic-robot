@@ -4,6 +4,7 @@ outputs/*
 .vscode/*
 wandb/*
 checkpoints/*
+LIBERO/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
