@@ -111,7 +111,7 @@ def main(cfg: DictConfig):
                 z_goal=z_goal,
             )
             ep_return += r
-            ep_frames.append(obs[cfg.encoder.camera_key].copy())
+            ep_frames.append(obs[cfg.encoder.camera_key][::-1].copy())
             obs = next_obs
             ep_step += 1
 
@@ -123,7 +123,7 @@ def main(cfg: DictConfig):
         successes.append(float(success))
         returns.append(ep_return)
         distances.append(dist)
-        frames.append(ep_frames)
+        frames.append(ep_frames[::-1].copy())
 
         logger.info(
             "Episode %d/%d | return=%.3f | dist=%.4f | success=%s",

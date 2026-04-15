@@ -234,7 +234,7 @@ class Trainer:
             frames: List[np.ndarray] = []
 
             # ---- Save goal image ------------------------------------
-            goal_img = goal_obs[self.cfg.encoder.camera_key]  # (H, W, 3) uint8
+            goal_img = goal_obs[self.cfg.encoder.camera_key][::-1].copy()  # (H, W, 3) uint8
             goal_path = os.path.join(eval_dir, f"ep_{ep:03d}_goal.png")
             Image.fromarray(goal_img).save(goal_path)
             logger.debug("Goal image saved: %s", goal_path)
@@ -242,7 +242,7 @@ class Trainer:
             # ---- Roll out episode -----------------------------------
             while not done and ep_step < max_steps:
                 # Capture frame before stepping (shows state at this step)
-                frames.append(obs[self.cfg.encoder.camera_key].copy())
+                frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
 
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
@@ -262,7 +262,7 @@ class Trainer:
                 obs = next_obs
 
             # Capture the final frame
-            frames.append(obs[self.cfg.encoder.camera_key].copy())
+            frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
 
             # ---- Save episode video ---------------------------------
             video_path = os.path.join(eval_dir, f"ep_{ep:03d}_rollout.mp4")
