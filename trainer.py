@@ -82,7 +82,6 @@ class Trainer:
          # Warm-up: collect random transitions before training starts
         logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
         self._warmup(obs) 
-        # HERE
     
         # Set a goal for the first episode
         self._goal_obs = self._sample_goal_obs()
@@ -92,6 +91,8 @@ class Trainer:
         episode_steps = 0
 
         pbar = tqdm(total=self.cfg.training.total_env_steps, desc="Training")
+        
+        # Main training loop
         while self.total_steps < self.cfg.training.total_env_steps: 
             
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
@@ -182,10 +183,15 @@ class Trainer:
                 # Reset for next episode
                 self.episode_num += 1
 
+                # new goal for next episode 
                 self._goal_obs = self._sample_goal_obs()
                 z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
+                
+                # reset starting obs
                 obs = self.env.reset()
                 z = self.encoder.encode(self._single_obs(obs))
+
+                # reset episode return and steps
                 episode_return = 0.0
                 episode_steps = 0
 
