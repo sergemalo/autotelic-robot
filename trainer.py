@@ -89,7 +89,7 @@ class Trainer:
         episode_steps = 0
 
         pbar = tqdm(total=self.cfg.total_env_steps, desc="Training")
-        while self.total_steps < self.cfg.total_env_steps:
+        while self.total_steps < self.cfg.total_env_steps: 
 
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
             # ---- Encode current obs and goal -------------------------
