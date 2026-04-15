@@ -17,7 +17,7 @@ target_entropy: auto          # auto → -|A|, or set manually
 # training schedule
 batch_size: 256
 updates_per_step: 1
-warmup_steps: 1000            # random actions before training starts
+warmup_steps: 20            # random actions before training starts
 
 # BC pretraining — set path to load a pretrained actor
 pretrained_bc_path: null      # e.g. checkpoints/bc_actor.pt
