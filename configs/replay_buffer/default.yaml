@@ -1,6 +1,6 @@
 # @package _global_.replay_buffer
 name: default
-capacity: 100000
+capacity: 100000 
 # Goal relabeling strategy (RIG-style)
 # future: sample goal from future states in same episode
 # buffer: sample goal randomly from replay buffer (our default)

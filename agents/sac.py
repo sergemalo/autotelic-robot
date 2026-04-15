@@ -155,12 +155,13 @@ class SACAgent:
         self.critic_optimizer.step()
         metrics.update(metrics_c)
 
-        # ---- Actor + alpha update -----------------------------------
+        # ---- Actor update -----------------------------------
         actor_loss, alpha_loss, metrics_a = self._actor_alpha_loss(z, z_goal)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
+        # ---- Alpha update ------------------------------------
         self.alpha_optimizer.zero_grad()
         alpha_loss.backward()
         self.alpha_optimizer.step()

@@ -73,27 +73,28 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def train(self):
-        logger.info("Starting training for %d env steps.", self.cfg.total_env_steps)
+        logger.info("Starting training for %d env steps.", self.cfg.training.total_env_steps)
 
-        obs = self.env.reset()
-
-        # Warm-up: collect random transitions before training starts
-        logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
-        self._warmup(obs)
-
-        # Set a goal for the first episode
-        self._goal_obs = self._sample_goal_obs()
+        # Initial obs and encoding
         obs = self.env.reset()
         z = self.encoder.encode(self._single_obs(obs))
+
+         # Warm-up: collect random transitions before training starts
+        logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
+        self._warmup(obs) 
+        # HERE
+    
+        # Set a goal for the first episode
+        self._goal_obs = self._sample_goal_obs()
+        z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
+        
         episode_return = 0.0
         episode_steps = 0
 
-        pbar = tqdm(total=self.cfg.total_env_steps, desc="Training")
-        while self.total_steps < self.cfg.total_env_steps: 
-
+        pbar = tqdm(total=self.cfg.training.total_env_steps, desc="Training")
+        while self.total_steps < self.cfg.training.total_env_steps: 
+            
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
-            # ---- Encode current obs and goal -------------------------
-            z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
 
             # ---- Select action ---------------------------------------
             action = self.agent.select_action(z, z_goal, deterministic=False)
@@ -126,15 +127,18 @@ class Trainer:
                 step_in_ep=episode_steps,
             )
 
+            # Update episode return and steps
             episode_return += reward
             episode_steps += 1
             self.total_steps += 1
             pbar.update(1)
 
+            # update obs and z for next step
             obs = next_obs
             z = z_next
 
             # ---- SAC update -----------------------------------------
+            
             #logger.info("SAC update")
 
             for _ in range(self.cfg.agent.updates_per_step):
@@ -179,6 +183,7 @@ class Trainer:
                 self.episode_num += 1
 
                 self._goal_obs = self._sample_goal_obs()
+                z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
                 obs = self.env.reset()
                 z = self.encoder.encode(self._single_obs(obs))
                 episode_return = 0.0
@@ -339,11 +344,12 @@ class Trainer:
                 device=self.device,
             )
 
-        # Optionally recompute rewards with privileged function on relabeled goals
+        # Optionally :
+        # - recompute rewards with privileged function on relabeled goals
         # (only needed when reward is privileged and goals were relabeled)
-        # For latent reward, the buffer already recomputes in latent space.
-        # For privileged reward, rewards stored in buffer are w.r.t. original goal;
+        # - For privileged reward, rewards stored in buffer are w.r.t. original goal;
         # relabeled reward recomputation is handled below.
+        # - For latent reward, the buffer already recomputes in latent space. )
         if self.cfg.reward.name == "privileged":
             rewards = self._recompute_privileged_rewards(
                 z_next, goal_obs_batch, self.device
@@ -386,6 +392,9 @@ class Trainer:
             # Dummy zero reward during warmup — buffer is just being seeded
             z = self.encoder.encode(self._single_obs(obs))
             z_next = self.encoder.encode(self._single_obs(next_obs))
+            
+
+
             self.buffer.push(
                 obs=obs,
                 z=z,

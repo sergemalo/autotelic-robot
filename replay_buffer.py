@@ -225,5 +225,8 @@ class ReplayBuffer:
                 goal_idxs[i] = np.random.randint(0, self._size)
         return goal_idxs
 
+    def reset(self):
+        self._ptr = 0
+        
     def __len__(self) -> int:
         return self._size
