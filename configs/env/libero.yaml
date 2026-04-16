@@ -1,7 +1,8 @@
 # @package _global_.env
 name: libero
-task_suite: libero_spatial    # libero_spatial | libero_object | libero_goal | libero_10
-task_id: 0
+object_name: milk             # MuJoCo object name (must exist in LIBERO assets)
+#task_suite: libero_spatial    # libero_spatial | libero_object | libero_goal | libero_10
+#task_id: 0
 camera_heights: 224
 camera_widths: 224
 camera_name: agentview        # agentview | robot0_eye_in_hand

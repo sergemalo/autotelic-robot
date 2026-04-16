@@ -19,6 +19,7 @@ from agents.sac import SACAgent
 from encoders import make_encoder
 from encoders.base import BaseEncoder
 from envs.libero_env import LiberoEnv
+from envs.goals_dataset import GoalSample, GoalsDataset
 from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
@@ -62,6 +63,17 @@ class Trainer:
         # ---- State --------------------------------------------------
         self.total_steps = 0
         self.episode_num = 0
+
+        # ---- Goal management -----------------------------------------
+        self.goal_ds = GoalsDataset(cfg, self.env)
+        self.goal_ds.generate()
+        goal_test = self.goal_ds.sample_goal()
+        logger.info("Sampled test goal from dataset: pos=%s image_shape=%s",
+                    goal_test.position, goal_test.image.shape)
+        # Generate image file for the test goal
+        test_goal_path = os.path.join(cfg.checkpoint_dir, "test_goal.png")
+        Image.fromarray(goal_test.image).save(test_goal_path)
+        logger.info("Test goal image saved: %s", test_goal_path)
 
         # Current goal obs — sampled from buffer or set at episode start
         self._goal_obs: Optional[dict] = None

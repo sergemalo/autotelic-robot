@@ -5,9 +5,9 @@ Wraps OffScreenRenderEnv into a clean interface that:
   - returns obs dicts consistently
   - handles episode resets and goal obs management
   - exposes check_success()
+  - exposes set_object_position() for goal generation
 """
 import logging
-import os
 import tempfile
 from typing import Dict, Optional, Tuple
 
@@ -15,11 +15,6 @@ import numpy as np
 from omegaconf import DictConfig
 
 logger = logging.getLogger(__name__)
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +90,7 @@ def write_bddl(
     )
     tmp.write(content)
     tmp.flush()
-    logger.info(f"BDDL written to: {tmp.name}")
+    logger.info("BDDL written to: %s", tmp.name)
     logger.debug("BDDL content:\n%s", content)
     return tmp.name
 
@@ -133,10 +128,10 @@ def set_arm_qpos(env, qpos: np.ndarray, n_settle: int = 50):
     for i, name in enumerate(_JOINT_NAMES):
         try:
             jnt_id = sim.model.joint_name2id(name)
-            addr   = sim.model.jnt_qposadr[jnt_id]
+            addr = sim.model.jnt_qposadr[jnt_id]
             sim.data.qpos[addr] = qpos[i]
         except Exception:
-            logger.warning(f"Could not set joint '{name}' — skipping.")
+            logger.warning("Could not set joint '%s' — skipping.", name)
     sim.forward()
     obs = None
     dummy = [0.0] * 7
@@ -149,25 +144,30 @@ def set_arm_qpos(env, qpos: np.ndarray, n_settle: int = 50):
 # Object position helper
 # ---------------------------------------------------------------------------
 
-def get_object_pos(obs: dict, object_name: str):
+def get_object_pos(obs: dict, object_name: str) -> Optional[np.ndarray]:
     """Return the object's world-frame (x, y, z) position from obs, or None."""
     key = f"{object_name}_1_pos"
     if key in obs:
         return np.array(obs[key])
     candidates = [k for k in obs if object_name in k and "pos" in k]
     if candidates:
-        logger.warning(f"Key '{key}' not found; using '{candidates[0]}' instead.")
+        logger.warning("Key '%s' not found; using '%s' instead.", key, candidates[0])
         return np.array(obs[candidates[0]])
-    logger.warning(f"No position key found for object '{object_name}'. "
-                   f"Available keys: {sorted(obs.keys())}")
+    logger.warning(
+        "No position key found for object '%s'. Available keys: %s",
+        object_name, sorted(obs.keys()),
+    )
     return None
 
 
-
+# ---------------------------------------------------------------------------
+# LiberoEnv
+# ---------------------------------------------------------------------------
 
 class LiberoEnv:
     """
-    Thin wrapper around LIBERO's OffScreenRenderEnv.
+    Thin wrapper around LIBERO's OffScreenRenderEnv for a single-object
+    custom scene defined by a generated BDDL file.
 
     Attributes:
         action_dim:  dimensionality of the action space (7)
@@ -182,16 +182,15 @@ class LiberoEnv:
         self.action_dim = cfg.env.action_dim
 
         # ------------------------------------------------------------------
-        # 1. Write BDDL and create environment
+        # Write BDDL and create environment
         # ------------------------------------------------------------------
         bddl_path = write_bddl(
-            object_name="milk",
+            object_name=cfg.env.object_name,
             cx=0.0,
             cy=0.0,
-            half_size=0.005, # Placement rectangle half-size (m); smaller = more deterministic
+            half_size=0.005,  # Placement rectangle half-size (m)
         )
 
-        # ---- Build environment ---------------------------------------
         env_args = {
             "bddl_file_name": bddl_path,
             "hard_reset": False,
@@ -208,13 +207,13 @@ class LiberoEnv:
 
         logger.info("LiberoEnv ready.")
 
+    # ------------------------------------------------------------------
+    # Core interface
+    # ------------------------------------------------------------------
+
     def reset(self) -> Dict[str, np.ndarray]:
         """
-        Reset the environment.
-
-        Args:
-            init_state_idx: which initial state to use. If None, cycles
-                            through states sequentially.
+        Reset the environment to the stored initial state.
 
         Returns:
             obs dict
@@ -223,7 +222,6 @@ class LiberoEnv:
         self._env.set_init_state(self._init_state)
         self.episode_step = 0
 
-        # Take a no-op step to get a clean obs
         obs, _, _, _ = self._env.step([0.0] * self.action_dim)
         self.obs = obs
         return obs
@@ -261,3 +259,92 @@ class LiberoEnv:
     def close(self):
         self._env.close()
         logger.debug("LiberoEnv closed.")
+
+    # ------------------------------------------------------------------
+    # Goal generation support
+    # ------------------------------------------------------------------
+
+    def set_object_position(
+        self,
+        x: float,
+        y: float,
+        object_name: Optional[str] = None,
+        n_settle: int = 50,
+    ) -> Dict[str, np.ndarray]:
+        """
+        Teleport the object to (x, y) on the table surface and let physics
+        settle.
+
+        The z coordinate is kept at its current value (resting on the table),
+        so only x and y are controlled. The object's quaternion is preserved.
+
+        Args:
+            x:           target x position in world frame (metres)
+            y:           target y position in world frame (metres)
+            object_name: name of the object body in the MuJoCo model.
+                         Defaults to cfg.env.object_name + "_1".
+            n_settle:    number of no-op steps to let physics settle after
+                         the teleport.
+
+        Returns:
+            obs dict after settling
+        """
+        if object_name is None:
+            object_name = f"{self.cfg.env.object_name}_1"
+
+        sim = self._env.sim
+
+        # Locate the free joint that controls this object.
+        # Free joints have 7 DOF in qpos: [x, y, z, qw, qx, qy, qz].
+        try:
+            joint_name = f"{object_name}_joint"
+            jnt_id = sim.model.joint_name2id(joint_name)
+            addr = sim.model.jnt_qposadr[jnt_id]
+        except Exception:
+            # Fallback: try to find the joint via body name
+            try:
+                body_id = sim.model.body_name2id(object_name)
+                jnt_id = sim.model.body_jntadr[body_id]
+                addr = sim.model.jnt_qposadr[jnt_id]
+                logger.debug(
+                    "Located object joint via body fallback: body=%s, jnt_id=%d",
+                    object_name, jnt_id,
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not locate free joint for object '{object_name}'. "
+                    f"Check that cfg.env.object_name matches the MuJoCo body name. "
+                    f"Original error: {e}"
+                )
+
+        # Read current z and quaternion — preserve them
+        current_z = float(sim.data.qpos[addr + 2])
+        current_quat = sim.data.qpos[addr + 3: addr + 7].copy()
+
+        # Write new x, y; keep z and orientation
+        sim.data.qpos[addr + 0] = x
+        sim.data.qpos[addr + 1] = y
+        sim.data.qpos[addr + 2] = current_z
+        sim.data.qpos[addr + 3: addr + 7] = current_quat
+
+        # Zero out object velocity to prevent sliding after teleport
+        try:
+            jnt_vel_addr = sim.model.jnt_dofadr[jnt_id]
+            sim.data.qvel[jnt_vel_addr: jnt_vel_addr + 6] = 0.0
+        except Exception:
+            logger.debug("Could not zero object velocity — skipping.")
+
+        sim.forward()
+
+        # Settle physics with no-op steps
+        obs = None
+        dummy = [0.0] * self.action_dim
+        for _ in range(n_settle):
+            obs, _, _, _ = self._env.step(dummy)
+
+        self.obs = obs
+        logger.debug(
+            "Object '%s' moved to (%.4f, %.4f). Settled over %d steps.",
+            object_name, x, y, n_settle,
+        )
+        return obs

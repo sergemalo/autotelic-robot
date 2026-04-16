@@ -5,6 +5,7 @@ defaults:
   - replay_buffer: default
   - env: libero
   - wandb: default
+  - goals: default
   - _self_
 
 seed: 42
