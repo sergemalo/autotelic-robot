@@ -77,14 +77,14 @@ class Trainer:
 
         # Initial obs and encoding
         obs = self.env.reset()
-        z = self.encoder.encode(self._single_obs(obs))
+        z = self.encoder.encode(self._single_obs(obs)) # used by latent reward and networks
 
          # Warm-up: collect random transitions before training starts
         logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
         self._warmup(obs) 
     
         # Set a goal for the first episode
-        self._goal_obs = self._sample_goal_obs()
+        self._goal_obs = self._sample_goal_obs() # from a buffer of random goal object positions
         z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
         
         episode_return = 0.0
@@ -355,11 +355,13 @@ class Trainer:
         # (only needed when reward is privileged and goals were relabeled)
         # - For privileged reward, rewards stored in buffer are w.r.t. original goal;
         # relabeled reward recomputation is handled below.
-        # - For latent reward, the buffer already recomputes in latent space. )
+        # - For latent reward, the buffer already recomputes in latent space.
         if self.cfg.reward.name == "privileged":
             rewards = self._recompute_privileged_rewards(
                 z_next, goal_obs_batch, self.device
             )
+
+
 
         return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
 
@@ -372,8 +374,12 @@ class Trainer:
         """
         key = self.cfg.reward.object_pos_key
         pos_next = goal_obs_batch[key]          # (B, 3) — next obs positions
+
+
         # For a relabeled goal, the "goal position" is the next_obs of the
         # sampled goal transition.
+
+
         # We use the same key from the goal obs batch.
         pos_goal = goal_obs_batch[key]          # same batch, acts as goal
 
@@ -407,7 +413,7 @@ class Trainer:
                 action=action,
                 next_obs=next_obs,
                 next_z=z_next,
-                reward=0.0,
+                reward=0.0 - self.cfg.training.reward_offset,
                 done=done,
                 step_in_ep=step_in_ep,
             )

@@ -15,6 +15,7 @@ checkpoint_freq: 10000        # save every N env steps
 
 training:
   total_env_steps: 2000
+  reward_offset: 200 # to verify : we want diago of table... 
 
 eval:
   eval_freq: 500               # eval every N env steps
@@ -22,3 +23,4 @@ eval:
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+
