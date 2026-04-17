@@ -126,6 +126,10 @@ class Trainer:
                 reward=reward,
                 done=done,
                 step_in_ep=episode_steps,
+                z_goal=z_goal,  # Store original goal
+                goal_obs=self._goal_obs,  # Store original goal obs
+                is_warmup=False,  # Not warmup
+
             )
 
             # Update episode return and steps
@@ -344,23 +348,28 @@ class Trainer:
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
-        z, actions, z_next, rewards, dones, z_goal, goal_obs_batch = \
+        z, actions, z_next, rewards, dones, z_goal, goal_obs_batch, relabeled_mask = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
                 device=self.device,
             )
 
-        # Optionally :
-        # - recompute rewards with privileged function on relabeled goals
-        # (only needed when reward is privileged and goals were relabeled)
-        # - For privileged reward, rewards stored in buffer are w.r.t. original goal;
-        # relabeled reward recomputation is handled below.
-        # - For latent reward, the buffer already recomputes in latent space.
-        if self.cfg.reward.name == "privileged":
-            rewards = self._recompute_privileged_rewards(
-                z_next, goal_obs_batch, self.device
-            )
-
+         # Only recompute rewards for relabeled transitions
+        if relabeled_mask.any():
+            if self.cfg.reward.name == "privileged":
+                relabeled_rewards = self._recompute_privileged_rewards(
+                    z_next[relabeled_mask], 
+                    {k: v[relabeled_mask.cpu().numpy()] for k, v in goal_obs_batch.items()},
+                    self.device
+                )
+                rewards[relabeled_mask] = relabeled_rewards
+                
+            elif self.cfg.reward.name == "latent":
+                relabeled_rewards = -torch.norm(
+                    z_next[relabeled_mask] - z_goal[relabeled_mask], 
+                    dim=-1, keepdim=True
+                ) * self.cfg.reward.reward_scale
+                rewards[relabeled_mask] = relabeled_rewards
 
 
         return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
@@ -394,7 +403,6 @@ class Trainer:
 
     def _warmup(self, obs: dict):
         """Collect random transitions to seed the replay buffer."""
-        #goal_obs = self._random_goal_obs(obs)
         step_in_ep = 0
 
         for _ in tqdm(range(self.cfg.agent.warmup_steps)):
@@ -405,24 +413,25 @@ class Trainer:
             z = self.encoder.encode(self._single_obs(obs))
             z_next = self.encoder.encode(self._single_obs(next_obs))
             
-
-
             self.buffer.push(
                 obs=obs,
                 z=z,
                 action=action,
                 next_obs=next_obs,
                 next_z=z_next,
-                reward=0.0 - self.cfg.training.reward_offset,
+                reward=0.0, # 0 reward during warmup; actual rewards are computed during updates
                 done=done,
                 step_in_ep=step_in_ep,
+                z_goal=None,  # No original goal
+                goal_obs=None,
+                is_warmup=True,  # Mark as warmup
             )
+
             step_in_ep += 1
 
             if done:
                 self.buffer.end_episode()
                 obs = self.env.reset()
-                #goal_obs = self._random_goal_obs(obs)
                 step_in_ep = 0
             else:
                 obs = next_obs

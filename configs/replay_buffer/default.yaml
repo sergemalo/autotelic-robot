@@ -5,5 +5,5 @@ capacity: 100000
 # future: sample goal from future states in same episode
 # buffer: sample goal randomly from replay buffer (our default)
 # mixed: 50% future + 50% buffer
-goal_sampling_strategy: mixed
+goal_sampling_strategy: mixed 
 future_fraction: 0.5          # used when strategy is mixed
