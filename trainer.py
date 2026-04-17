@@ -348,7 +348,7 @@ class Trainer:
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
-        z, actions, z_next, rewards, dones, z_goal, goal_obs_batch, relabeled_mask = \
+        z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, relabeled_mask = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
                 device=self.device,
@@ -358,10 +358,10 @@ class Trainer:
         if relabeled_mask.any():
             if self.cfg.reward.name == "privileged":
                 relabeled_rewards = self._recompute_privileged_rewards(
-                    z_next[relabeled_mask], 
-                    {k: v[relabeled_mask.cpu().numpy()] for k, v in goal_obs_batch.items()},
+                    {k: v[relabeled_mask] for k, v in next_obs.items()},  
+                    {k: v[relabeled_mask] for k, v in goal_obs_batch.items()},
                     self.device
-                )
+             )
                 rewards[relabeled_mask] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":
@@ -375,30 +375,23 @@ class Trainer:
         return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
 
     def _recompute_privileged_rewards(
-        self, z_next, goal_obs_batch: dict, device: torch.device
+        self, next_obs: dict, goal_obs_batch: dict, device: torch.device
     ) -> torch.Tensor:
         """
         Recompute privileged rewards for a batch of relabeled goals.
         Returns a (B, 1) tensor.
         """
         key = self.cfg.reward.object_pos_key
-        pos_next = goal_obs_batch[key]          # (B, 3) — next obs positions
 
+        # Extract positions from the observation dictionaries and convert to numpy for distance computation
+        pos_next = next_obs[key]
+        pos_goal = goal_obs_batch[key]        
 
-        # For a relabeled goal, the "goal position" is the next_obs of the
-        # sampled goal transition.
+        # Compute Euclidean distance with torch
+        dists = torch.norm(pos_next - pos_goal, dim=-1, keepdim=True)
 
-
-        # We use the same key from the goal obs batch.
-        pos_goal = goal_obs_batch[key]          # same batch, acts as goal
-
-        # distance is zero for same-index — this is handled correctly by
-        # the mixed sampling since goal is a *different* sampled transition.
-        # Re-using the batch as both is intentional for the recomputation path.
-        dists = np.linalg.norm(
-            pos_next - pos_goal, axis=-1, keepdims=True
-        ).astype(np.float32)
         rewards = -dists * self.cfg.reward.reward_scale
+
         return torch.FloatTensor(rewards).to(device)
 
     def _warmup(self, obs: dict):

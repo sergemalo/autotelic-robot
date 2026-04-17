@@ -183,37 +183,40 @@ class ReplayBuffer:
     ) -> Tuple[
         torch.Tensor,  # z        (B, latent_dim)
         torch.Tensor,  # actions  (B, action_dim)
+        Dict,          # next_obs (dict of multiple different modalities, each (B, ...))
         torch.Tensor,  # z_next   (B, latent_dim)
         torch.Tensor,  # rewards  (B, 1)
         torch.Tensor,  # dones    (B, 1)
         torch.Tensor,  # z_goal   (B, latent_dim)
         Dict,          # raw goal obs (for privileged reward recomputation)
+        torch.tensor,  # relabel mask (True if relabeled, False if original)
     ]:
         assert self._size >= batch_size, (
             f"Buffer has only {self._size} transitions, need {batch_size}."
         )
 
-        idxs = np.random.randint(0, self._size, size=batch_size)
+        idxs = np.random.randint(0, self._size, size=batch_size) # sample indices 
 
-        # Copy z tensors to [b][latent_dim]
-        z_batch = torch.stack([self._z[i] for i in idxs])
-        next_z_batch = torch.stack([self._next_z[i] for i in idxs])
+        # convert to tensors and move to device
+        z_batch = torch.stack([self._z[i] for i in idxs]).to(device)
+        next_obs_batch = {k: torch.FloatTensor(self._next_obs[k][idxs]).to(device) for k in self._next_obs}
+        next_z_batch = torch.stack([self._next_z[i] for i in idxs]).to(device)
         actions = torch.FloatTensor(self._actions[idxs]).to(device)
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
         dones = torch.FloatTensor(self._dones[idxs]).to(device)
 
         #------ Goal relabeling ---------------------------------------
-        # Determine which goals to relabel
-        is_warmup = self._is_warmup[idxs]
-        use_relabeled = is_warmup.copy()  # Always relabel warmup
+        # warmup transitions are always relabeled
+        is_warmup = self._is_warmup[idxs] 
+        use_relabeled = is_warmup.copy()   # start with warmup mask (True for warmup, False for non-warmup)
 
-         # For non-warmup: 50% keep original, 50% relabel
-        non_warmup_mask = ~is_warmup
-        relabel_dice = np.random.rand(batch_size) < 0.5
-        use_relabeled[non_warmup_mask] = relabel_dice[non_warmup_mask]
+        # For non-warmup: 50% keep original, 50% relabel
+        non_warmup_mask = ~is_warmup  # only consider non-warmup transitions for random relabeling
+        relabel_dice = np.random.rand(batch_size) < 0.5 # 50% chance to relabel for non-warmup transitions
+        use_relabeled[non_warmup_mask] = relabel_dice[non_warmup_mask] # combine with warmup mask to get final relabeling decision
 
 
-        # Sample goals
+        # Construct goal batches based on relabeling decisions
         z_goal_batch = []
         goal_obs_batch = {k: [] for k in self._next_obs}
         
@@ -230,11 +233,13 @@ class ReplayBuffer:
                 for key in goal_obs_batch:
                     goal_obs_batch[key].append(self._goal_obs_original[key][idx])
         
-        z_goal_batch = torch.stack(z_goal_batch)
+        z_goal_batch = torch.stack(z_goal_batch).to(device)
         goal_obs_batch = {k: np.array(v) for k, v in goal_obs_batch.items()}
 
+        relabeled_mask = torch.BoolTensor(use_relabeled).to(device)
+
         
-        return z_batch, actions, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch
+        return z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, relabeled_mask
     
     def _sample_relabeled_goal_idx(self, idx: int) -> int:
         """Sample either future or buffer goal (50/50 mix)."""
