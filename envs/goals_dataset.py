@@ -15,6 +15,7 @@ Usage:
 import logging
 from dataclasses import dataclass
 from typing import List, Optional
+from tqdm import tqdm
 
 import numpy as np
 from omegaconf import DictConfig
@@ -97,12 +98,10 @@ class GoalsDataset:
         xs = rng.uniform(self.cfg.goals.x_min, self.cfg.goals.x_max, size=n)
         ys = rng.uniform(self.cfg.goals.y_min, self.cfg.goals.y_max, size=n)
 
-        for i in range(n):
+        for i in tqdm(range(n), desc="Generating goals"):
             goal = self._capture_goal(xs[i], ys[i])
             self._goals.append(goal)
 
-            if (i + 1) % max(1, n // 10) == 0:
-                logger.info("  Generated %d / %d goals.", i + 1, n)
 
         # Restore env to a clean state after goal generation
         self.env.reset()

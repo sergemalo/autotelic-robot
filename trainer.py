@@ -65,15 +65,19 @@ class Trainer:
         self.episode_num = 0
 
         # ---- Goal management -----------------------------------------
+        # Geneate Goal Dataset
         self.goal_ds = GoalsDataset(cfg, self.env)
         self.goal_ds.generate()
+
+        # TEMPORARY - Sample a test goal to verify dataset and save an example image
         goal_test = self.goal_ds.sample_goal()
         logger.info("Sampled test goal from dataset: pos=%s image_shape=%s",
                     goal_test.position, goal_test.image.shape)
         # Generate image file for the test goal
-        test_goal_path = os.path.join(cfg.checkpoint_dir, "test_goal.png")
-        Image.fromarray(goal_test.image).save(test_goal_path)
+        test_goal_path = os.path.join(cfg.output_dir, "test_goal.png")
+        Image.fromarray(goal_test.image[::-1]).save(test_goal_path)
         logger.info("Test goal image saved: %s", test_goal_path)
+        # END OF TEMPORARY GOAL DATASET TEST
 
         # Current goal obs — sampled from buffer or set at episode start
         self._goal_obs: Optional[dict] = None
@@ -229,7 +233,7 @@ class Trainer:
 
         # Create output directory for this eval checkpoint
         eval_dir = os.path.join(
-            self.cfg.checkpoint_dir, "eval", f"step_{self.total_steps}"
+            self.cfg.output_dir, "eval", f"step_{self.total_steps}"
         )
         os.makedirs(eval_dir, exist_ok=True)
         logger.info("Saving eval visuals to: %s", eval_dir)

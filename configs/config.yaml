@@ -11,6 +11,7 @@ defaults:
 seed: 42
 device: cuda
 
+output_dir: ${hydra:runtime.output_dir}
 checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
 checkpoint_freq: 10000        # save every N env steps
 

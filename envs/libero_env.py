@@ -115,7 +115,7 @@ NEUTRAL_QPOS = np.array([
 _JOINT_NAMES = [
     "robot0_joint1", "robot0_joint2", "robot0_joint3",
     "robot0_joint4", "robot0_joint5", "robot0_joint6", "robot0_joint7",
-    "robot0_r_gripper_l_finger_joint", "robot0_r_gripper_r_finger_joint",
+    "gripper0_finger_joint1", "gripper0_finger_joint2",
 ]
 
 
@@ -207,6 +207,7 @@ class LiberoEnv:
 
         logger.info("LiberoEnv ready.")
 
+
     # ------------------------------------------------------------------
     # Core interface
     # ------------------------------------------------------------------
@@ -297,14 +298,18 @@ class LiberoEnv:
         # Locate the free joint that controls this object.
         # Free joints have 7 DOF in qpos: [x, y, z, qw, qx, qy, qz].
         try:
-            joint_name = f"{object_name}_joint"
+            joint_name = f"{object_name}_joint0"
+            logger.debug("Locating object joint by name: '%s'", joint_name)
             jnt_id = sim.model.joint_name2id(joint_name)
+            logger.debug("Located object joint: id=%d", jnt_id)
             addr = sim.model.jnt_qposadr[jnt_id]
         except Exception:
             # Fallback: try to find the joint via body name
             try:
                 body_id = sim.model.body_name2id(object_name)
+                logger.debug("Locating object joint via body name: '%s'", object_name)
                 jnt_id = sim.model.body_jntadr[body_id]
+                logger.debug("Located object joint via body: id=%d", jnt_id)
                 addr = sim.model.jnt_qposadr[jnt_id]
                 logger.debug(
                     "Located object joint via body fallback: body=%s, jnt_id=%d",
@@ -332,7 +337,7 @@ class LiberoEnv:
             jnt_vel_addr = sim.model.jnt_dofadr[jnt_id]
             sim.data.qvel[jnt_vel_addr: jnt_vel_addr + 6] = 0.0
         except Exception:
-            logger.debug("Could not zero object velocity — skipping.")
+            logger.error("Could not zero object velocity — skipping.")
 
         sim.forward()
 
