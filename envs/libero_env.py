@@ -181,11 +181,13 @@ class LiberoEnv:
         self.episode_step = 0
         self.action_dim = cfg.env.action_dim
 
+        self.object_name = "milk"
+
         # ------------------------------------------------------------------
         # 1. Write BDDL and create environment
         # ------------------------------------------------------------------
         bddl_path = write_bddl(
-            object_name="milk",
+            object_name=self.object_name,
             cx=0.0,
             cy=0.0,
             half_size=0.005, # Placement rectangle half-size (m); smaller = more deterministic
@@ -206,9 +208,13 @@ class LiberoEnv:
         self._init_state = self._env.sim.get_state().flatten()
         self.obs: Optional[Dict[str, np.ndarray]] = None
 
+        self.target_pos = np.array([6, 7, 1])  #  z apres le reset est de 0.96967218
+
+        self.success_threshold = 0.1
+
         logger.info("LiberoEnv ready.")
 
-    def reset(self) -> Dict[str, np.ndarray]:
+    def reset(self, goal_coordinates: np.ndarray = None) -> Dict[str, np.ndarray]:
         """
         Reset the environment.
 
@@ -222,6 +228,8 @@ class LiberoEnv:
         self._env.reset()
         self._env.set_init_state(self._init_state)
         self.episode_step = 0
+        if goal_coordinates is not None:
+            self.target_pos = goal_coordinates
 
         # Take a no-op step to get a clean obs
         obs, _, _, _ = self._env.step([0.0] * self.action_dim)
@@ -245,14 +253,25 @@ class LiberoEnv:
         obs, reward, done, info = self._env.step(action.tolist())
         self.episode_step += 1
 
-        # TODO: Define done=True 
-        done = False
+        done = self.check_custom_success(obs)
 
         truncated = self.episode_step >= self.cfg.env.episode_length
         done = bool(done) or truncated
 
         self.obs = obs
         return obs, float(reward), done, info
+
+    def check_custom_success(self, obs):
+        obj_pos = get_object_pos(obs, self.object_name)
+        # print('obj_pos', obj_pos)
+        if obj_pos is None:
+            return False
+
+        # dist = np.linalg.norm(obj_pos[:2] - self.target_pos[:2]) # on calcule la distance sur la base des coordonées (x,y)
+
+        dist = np.linalg.norm(obj_pos - self.target_pos)
+
+        return dist < self.success_threshold
 
     def check_success(self) -> bool:
         """Query LIBERO's built-in task success condition."""

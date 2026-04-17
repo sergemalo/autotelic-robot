@@ -23,6 +23,7 @@ from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
 from utils.logging_utils import WandBLogger
+from envs.libero_env import get_object_pos
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,11 @@ class Trainer:
 
         # Set a goal for the first episode
         self._goal_obs = self._sample_goal_obs()
-        obs = self.env.reset()
+
+        goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
+
+        obs = self.env.reset(goal_coordinates = goal_coordinates)
+
         z = self.encoder.encode(self._single_obs(obs))
         episode_return = 0.0
         episode_steps = 0
@@ -179,7 +184,10 @@ class Trainer:
                 self.episode_num += 1
 
                 self._goal_obs = self._sample_goal_obs()
-                obs = self.env.reset()
+
+                goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
+
+                obs = self.env.reset(goal_coordinates = goal_coordinates)
                 z = self.encoder.encode(self._single_obs(obs))
                 episode_return = 0.0
                 episode_steps = 0
