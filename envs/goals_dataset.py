@@ -14,8 +14,9 @@ Usage:
 """
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Dict
 from tqdm import tqdm
+from PIL import Image
 
 import numpy as np
 from omegaconf import DictConfig
@@ -28,8 +29,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GoalSample:
     """A single goal: the image the agent should reach and the object position."""
+    obs: Dict[str, np.ndarray]  # full obs dict (image + proprio + object positions)
     image: np.ndarray       # uint8 (H, W, 3)
     position: np.ndarray    # float32 (3,)  world-frame xyz
+
+    def save_image_to_file(self, image_path: str) -> None:
+        Image.fromarray(self.image[::-1]).save(image_path)
+
 
 
 class GoalsDataset:
@@ -180,4 +186,4 @@ class GoalsDataset:
             "Goal captured: requested=(%.4f, %.4f), actual=(%.4f, %.4f, %.4f)",
             x, y, position[0], position[1], position[2],
         )
-        return GoalSample(image=image, position=position)
+        return GoalSample(obs=obs, image=image, position=position)

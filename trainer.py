@@ -18,13 +18,12 @@ from agents import make_agent
 from agents.sac import SACAgent
 from encoders import make_encoder
 from encoders.base import BaseEncoder
-from envs.libero_env import LiberoEnv
+from envs.libero_env import LiberoEnv, get_object_pos
 from envs.goals_dataset import GoalSample, GoalsDataset
 from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
 from utils.logging_utils import WandBLogger
-from envs.libero_env import get_object_pos
 
 logger = logging.getLogger(__name__)
 
@@ -70,18 +69,9 @@ class Trainer:
         self.goal_ds = GoalsDataset(cfg, self.env)
         self.goal_ds.generate()
 
-        # TEMPORARY - Sample a test goal to verify dataset and save an example image
-        goal_test = self.goal_ds.sample_goal()
-        logger.info("Sampled test goal from dataset: pos=%s image_shape=%s",
-                    goal_test.position, goal_test.image.shape)
-        # Generate image file for the test goal
-        test_goal_path = os.path.join(cfg.output_dir, "test_goal.png")
-        Image.fromarray(goal_test.image[::-1]).save(test_goal_path)
-        logger.info("Test goal image saved: %s", test_goal_path)
-        # END OF TEMPORARY GOAL DATASET TEST
-
         # Current goal obs — sampled from buffer or set at episode start
         self._goal_obs: Optional[dict] = None
+        self._goal: Optional[GoalSample] = None
 
         logger.info("Trainer initialised.")
 
@@ -99,11 +89,13 @@ class Trainer:
         self._warmup(obs)
 
         # Set a goal for the first episode
-        self._goal_obs = self._sample_goal_obs()
+        self._goal = self.goal_ds.sample_goal()
+        self._goal_obs = self._goal.obs
+        self._goal.save_image_to_file(os.path.join(self.cfg.output_dir, "goal_image_0.png"))
 
-        goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
+        #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
 
-        obs = self.env.reset(goal_coordinates = goal_coordinates)
+        obs = self.env.reset(goal_coordinates = self._goal.position)
 
         z = self.encoder.encode(self._single_obs(obs))
         episode_return = 0.0
@@ -192,18 +184,17 @@ class Trainer:
                 # Log goal vs achieved images periodically
                 self.wandb.log_images(
                     step=self.total_steps,
-                    goal_image=self._goal_obs.get(self.cfg.encoder.camera_key),
-                    achieved_image=next_obs.get(self.cfg.encoder.camera_key),
+                    goal_image=self._goal.image[::-1],
+                    achieved_image=next_obs.get(self.cfg.encoder.camera_key)[::-1],
                 )
 
                 # Reset for next episode
                 self.episode_num += 1
 
-                self._goal_obs = self._sample_goal_obs()
+                self._goal = self.goal_ds.sample_goal()
+                self._goal_obs = self._goal.obs
 
-                goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
-
-                obs = self.env.reset(goal_coordinates = goal_coordinates)
+                obs = self.env.reset(goal_coordinates = self._goal.position)
                 z = self.encoder.encode(self._single_obs(obs))
                 episode_return = 0.0
                 episode_steps = 0
@@ -212,6 +203,16 @@ class Trainer:
             if self.total_steps % self.cfg.eval_freq == 0:
                 eval_metrics = self.evaluate()
                 self.wandb.log_scalar(eval_metrics, self.total_steps)
+
+                # Restore training state: eval borrows the env and leaves
+                # it in an undefined state. Reset everything so the next
+                # training step starts from a clean episode.
+                self._goal = self.goal_ds.sample_goal()
+                self._goal_obs = self._goal.obs
+                obs = self.env.reset(goal_coordinates=self._goal.position)
+                z = self.encoder.encode(self._single_obs(obs))
+                episode_return = 0.0
+                episode_steps = 0
 
             if self.total_steps % self.cfg.checkpoint_freq == 0:
                 ckpt_path = os.path.join(
@@ -249,8 +250,9 @@ class Trainer:
         successes, returns, distances = [], [], []
 
         for ep in range(self.cfg.eval_episodes):
-            obs = self.env.reset()
-            goal_obs = self._sample_goal_obs()
+            goal = self.goal_ds.sample_goal()
+            obs = self.env.reset(goal_coordinates=goal.position)
+            goal_obs = goal.obs
             ep_return = 0.0
             done = False
             ep_step = 0
@@ -258,12 +260,10 @@ class Trainer:
             frames: List[np.ndarray] = []
 
             # ---- Save goal image ------------------------------------
-            goal_img = goal_obs[self.cfg.encoder.camera_key][::-1].copy()  # (H, W, 3) uint8
-            goal_path = os.path.join(eval_dir, f"ep_{ep:03d}_goal.png")
-            Image.fromarray(goal_img).save(goal_path)
-            logger.debug("Goal image saved: %s", goal_path)
+            goal.save_image_to_file(os.path.join(eval_dir, f"ep_{ep:03d}_goal.png"))
 
             # ---- Roll out episode -----------------------------------
+            pbar = tqdm(total=max_steps, desc="Evaluating")
             while not done and ep_step < max_steps:
                 # Capture frame before stepping (shows state at this step)
                 frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
@@ -284,6 +284,10 @@ class Trainer:
                 ep_return += r
                 ep_step += 1
                 obs = next_obs
+                pbar.update(1)
+
+            pbar.close()
+
 
             # Capture the final frame
             frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
@@ -311,8 +315,8 @@ class Trainer:
             # ---- Log to WandB ---------------------------------------
             self.wandb.log_images(
                 step=self.total_steps,
-                goal_image=goal_img,
-                achieved_image=obs[self.cfg.encoder.camera_key],
+                goal_image=goal.image[::-1],
+                achieved_image=obs[self.cfg.encoder.camera_key][::-1],
             )
 
         metrics = {
@@ -436,13 +440,9 @@ class Trainer:
 
     def _sample_goal_obs(self) -> dict:
         """
-        Sample a goal obs from the replay buffer.
-        Falls back to a random obs if buffer is empty.
+        Sample a goal obs from Goal dataset
         """
-        if len(self.buffer) == 0:
-            return self.env.obs or self.env.reset()
-        idx = np.random.randint(0, len(self.buffer))
-        return {k: self.buffer._next_obs[k][idx] for k in self.buffer._next_obs}
+        return self.goal_ds.sample_goal().obs
 
     def _random_goal_obs(self, obs: dict) -> dict:
         """Use current obs as a placeholder goal during warmup."""

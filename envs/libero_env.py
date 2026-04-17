@@ -209,7 +209,7 @@ class LiberoEnv:
 
         self.target_pos = np.array([6, 7, 1])  #  z apres le reset est de 0.96967218
 
-        self.success_threshold = 0.1
+        self.success_threshold = cfg.env.success_threshold
 
         logger.info("LiberoEnv ready.")
 
@@ -231,8 +231,12 @@ class LiberoEnv:
         if goal_coordinates is not None:
             self.target_pos = goal_coordinates
 
+        logger.info(f"RESETTING ENVIRONEMENT")
+        logger.info(f"--> Goal coordinates: {self.target_pos}")
+
         obs, _, _, _ = self._env.step([0.0] * self.action_dim)
         self.obs = obs
+        logger.info(f"--> Actual coordinates: {get_object_pos(obs, self.object_name)}") 
         return obs
 
     def step(
@@ -255,12 +259,16 @@ class LiberoEnv:
         done = self.check_custom_success(obs)
 
         truncated = self.episode_step >= self.cfg.env.episode_length
-        done = bool(done) or truncated
+        if truncated:
+            logger.info(f"TRUNCATED")
+
+        done = done or truncated
 
         self.obs = obs
         return obs, float(reward), done, info
 
     def check_custom_success(self, obs):
+        success = False
         obj_pos = get_object_pos(obs, self.object_name)
         # print('obj_pos', obj_pos)
         if obj_pos is None:
@@ -270,7 +278,11 @@ class LiberoEnv:
 
         dist = np.linalg.norm(obj_pos - self.target_pos)
 
-        return dist < self.success_threshold
+        if dist < self.success_threshold:
+            logger.info(f"SUCCESS: Object reached target! Distance: {dist:.4f} m")
+            success = True
+
+        return success
 
     def check_success(self) -> bool:
         """Query LIBERO's built-in task success condition."""
