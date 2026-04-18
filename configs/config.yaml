@@ -1,0 +1,28 @@
+defaults:
+  - encoder: r3m
+  - reward: privileged
+  - agent: sac
+  - replay_buffer: default
+  - env: libero
+  - wandb: default
+  - goals: default
+  - _self_
+
+seed: 42
+device: cuda
+
+output_dir: ${hydra:runtime.output_dir}
+checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
+checkpoint_freq: 10000        # save every N env steps
+
+training:
+  total_env_steps: 100
+  reward_offset: 200 # to verify : we want diago of table... 
+
+eval:
+  eval_freq: 50               # eval every N env steps
+  eval_episodes: 1
+
+# logging
+log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+

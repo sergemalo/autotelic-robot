@@ -1,0 +1,23 @@
+# @package _global_.agent
+name: sac
+
+# network architecture
+hidden_dims: [512, 512, 512]
+activation: relu              # relu | tanh | elu
+
+# SAC hyperparameters
+actor_lr: 3.0e-4
+critic_lr: 3.0e-4
+alpha_lr: 3.0e-4
+gamma: 0.99
+tau: 0.005                    # soft target update
+init_temperature: 0.1
+target_entropy: auto          # auto → -|A|, or set manually
+
+# training schedule
+batch_size: 256
+updates_per_step: 1
+warmup_steps: 20            # random actions before training starts
+
+# BC pretraining — set path to load a pretrained actor
+pretrained_bc_path: null      # e.g. checkpoints/bc_actor.pt

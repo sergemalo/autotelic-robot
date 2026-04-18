@@ -1,0 +1,20 @@
+# Core
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+
+# Config
+hydra-core>=1.3.0
+omegaconf>=2.3.0
+
+# Experiment tracking
+wandb>=0.15.0
+
+# Encoders
+r3m                     # pip install r3m
+
+# LIBERO (install from source)
+# git clone https://github.com/montrealrobotics/LIBERO && pip install -e .
+
+# Utilities
+tqdm>=4.65.0

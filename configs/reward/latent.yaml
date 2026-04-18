@@ -1,0 +1,5 @@
+# @package _global_.reward
+name: latent
+reward_scale: 1.0
+# Distance metric in latent space
+distance_metric: euclidean    # euclidean | cosine

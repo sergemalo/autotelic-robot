@@ -19,9 +19,9 @@ pip install -r requirements.txt
 ```
 
 ## LIBERO
-1. Clone the Montreal fork:
+1. Clone the Serge Malo's fork:
 ```
-git clone https://github.com/montrealrobotics/LIBERO
+git clone https://github.com/sergemalo/LIBERO
 ```
 2. Install it:
 ```
@@ -63,8 +63,11 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 python3.10 check_pytorch.py
+pip install wandb
+pip install git+https://github.com/facebookresearch/r3m.git
 
-git clone https://github.com/montrealrobotics/LIBERO
+
+git clone https://github.com/sergemalo/LIBERO
 cd LIBERO/
 touch libero/__init__.py
 touch libero/libero/__init__.py
