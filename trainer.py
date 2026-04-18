@@ -23,6 +23,7 @@ from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
 from utils.logging_utils import WandBLogger
+from envs.libero_env import get_object_pos
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +78,20 @@ class Trainer:
 
         # Initial obs and encoding
         obs = self.env.reset()
-        z = self.encoder.encode(self._single_obs(obs)) # used by latent reward and networks
 
          # Warm-up: collect random transitions before training starts
         logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
         self._warmup(obs) 
     
         # Set a goal for the first episode
-        self._goal_obs = self._sample_goal_obs() # from a buffer of random goal object positions
+        self._goal_obs = self._sample_goal_obs()
+
+        goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
+
+        obs = self.env.reset(goal_coordinates = goal_coordinates)
+
+        z = self.encoder.encode(self._single_obs(obs))
         z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
-        
         episode_return = 0.0
         episode_steps = 0
 
@@ -192,7 +197,10 @@ class Trainer:
                 z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
                 
                 # reset starting obs
-                obs = self.env.reset()
+
+                goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
+
+                obs = self.env.reset(goal_coordinates = goal_coordinates)
                 z = self.encoder.encode(self._single_obs(obs))
 
                 # reset episode return and steps
@@ -249,7 +257,7 @@ class Trainer:
             frames: List[np.ndarray] = []
 
             # ---- Save goal image ------------------------------------
-            goal_img = goal_obs[self.cfg.encoder.camera_key]  # (H, W, 3) uint8
+            goal_img = goal_obs[self.cfg.encoder.camera_key][::-1].copy()  # (H, W, 3) uint8
             goal_path = os.path.join(eval_dir, f"ep_{ep:03d}_goal.png")
             Image.fromarray(goal_img).save(goal_path)
             logger.debug("Goal image saved: %s", goal_path)
@@ -257,7 +265,7 @@ class Trainer:
             # ---- Roll out episode -----------------------------------
             while not done and ep_step < max_steps:
                 # Capture frame before stepping (shows state at this step)
-                frames.append(obs[self.cfg.encoder.camera_key].copy())
+                frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
 
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
@@ -277,7 +285,7 @@ class Trainer:
                 obs = next_obs
 
             # Capture the final frame
-            frames.append(obs[self.cfg.encoder.camera_key].copy())
+            frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
 
             # ---- Save episode video ---------------------------------
             video_path = os.path.join(eval_dir, f"ep_{ep:03d}_rollout.mp4")
