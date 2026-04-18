@@ -213,13 +213,13 @@ def main():
         return
     
     # 1. Explore dataset structure
-    explore_dataset_structure(dataset_path)
+    explore_dataset_structure(dataset_path) # This will print the structure and dimensions of the first demo in the dataset
     
     # 2. Get a random trajectory
     demo_name = get_random_trajectory(dataset_path)
     
     # 3. Analyze trajectory data
-    analyze_trajectory_data(dataset_path, demo_name)
+    analyze_trajectory_data(dataset_path, demo_name) 
     
     # 4. Visualize the trajectory
     print("\nVisualizing trajectory...")
