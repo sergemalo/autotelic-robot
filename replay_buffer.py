@@ -143,6 +143,9 @@ class ReplayBuffer:
         self._ptr = (self._ptr + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
 
+        if self._size == 1:
+            self._log_sample_size()
+
     def end_episode(self):
         """Call at the end of each episode to flush the episode index."""
         if self._current_episode_indices:
@@ -227,3 +230,20 @@ class ReplayBuffer:
 
     def __len__(self) -> int:
         return self._size
+    
+    def _log_sample_size(self):
+        sample_size_bytes = 0
+        for key in self._obs:
+            sample_size_bytes += self._obs[key][0].nbytes
+            sample_size_bytes += self._next_obs[key][0].nbytes
+
+        sample_size_bytes += self._actions[0].nbytes
+        sample_size_bytes += self._rewards[0].nbytes
+        sample_size_bytes += self._dones[0].nbytes
+        sample_size_bytes += self._episode_ids[0].nbytes
+        sample_size_bytes += self._step_in_eps[0].nbytes
+
+        sample_size_gpu_bytes = self._z[0].element_size() * self._z[0].nelement() * 2
+
+        logger.info(f"Estimated size per sample: {sample_size_bytes / 1e3:.2f} KB (CPU) + {sample_size_gpu_bytes / 1e3:.2f} KB (GPU)")
+        logger.info(f"Estimated total buffer size: {(sample_size_bytes * self.capacity) / 1e9:.2f} GB (CPU) + {(sample_size_gpu_bytes * self.capacity) / 1e9:.2f} GB (GPU)")
