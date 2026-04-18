@@ -74,14 +74,15 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def train(self):
-        logger.info("Starting training for %d env steps.", self.cfg.total_env_steps)
+        logger.info("Starting training for %d env steps.", self.cfg.training.total_env_steps)
 
+        # Initial obs and encoding
         obs = self.env.reset()
 
-        # Warm-up: collect random transitions before training starts
+         # Warm-up: collect random transitions before training starts
         logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
-        self._warmup(obs)
-
+        self._warmup(obs) 
+    
         # Set a goal for the first episode
         self._goal_obs = self._sample_goal_obs()
 
@@ -90,15 +91,16 @@ class Trainer:
         obs = self.env.reset(goal_coordinates = goal_coordinates)
 
         z = self.encoder.encode(self._single_obs(obs))
+        z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
         episode_return = 0.0
         episode_steps = 0
 
-        pbar = tqdm(total=self.cfg.total_env_steps, desc="Training")
-        while self.total_steps < self.cfg.total_env_steps:
-
+        pbar = tqdm(total=self.cfg.training.total_env_steps, desc="Training")
+        
+        # Main training loop
+        while self.total_steps < self.cfg.training.total_env_steps: 
+            
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
-            # ---- Encode current obs and goal -------------------------
-            z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
 
             # ---- Select action ---------------------------------------
             action = self.agent.select_action(z, z_goal, deterministic=False)
@@ -129,17 +131,24 @@ class Trainer:
                 reward=reward,
                 done=done,
                 step_in_ep=episode_steps,
+                z_goal=z_goal,  # Store original goal
+                goal_obs=self._goal_obs,  # Store original goal obs
+                is_warmup=False,  # Not warmup
+
             )
 
+            # Update episode return and steps
             episode_return += reward
             episode_steps += 1
             self.total_steps += 1
             pbar.update(1)
 
+            # update obs and z for next step
             obs = next_obs
             z = z_next
 
             # ---- SAC update -----------------------------------------
+            
             #logger.info("SAC update")
 
             for _ in range(self.cfg.agent.updates_per_step):
@@ -183,17 +192,23 @@ class Trainer:
                 # Reset for next episode
                 self.episode_num += 1
 
+                # new goal for next episode 
                 self._goal_obs = self._sample_goal_obs()
+                z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
+                
+                # reset starting obs
 
                 goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
 
                 obs = self.env.reset(goal_coordinates = goal_coordinates)
                 z = self.encoder.encode(self._single_obs(obs))
+
+                # reset episode return and steps
                 episode_return = 0.0
                 episode_steps = 0
 
             # ---- Periodic eval + checkpoint -------------------------
-            if self.total_steps % self.cfg.eval_freq == 0:
+            if self.total_steps % self.cfg.eval.eval_freq == 0:
                 eval_metrics = self.evaluate()
                 self.wandb.log_scalar(eval_metrics, self.total_steps)
 
@@ -215,13 +230,13 @@ class Trainer:
 
     def evaluate(self) -> dict:
         """
-        Run cfg.eval_episodes deterministic episodes and return metrics.
+        Run cfg.eval.eval_episodes deterministic episodes and return metrics.
 
         For each episode, saves:
           - <eval_dir>/step_<N>/ep_<E>_goal.png   — the goal image
           - <eval_dir>/step_<N>/ep_<E>_rollout.mp4 — the full episode video
         """
-        logger.info("Evaluating for %d episodes...", self.cfg.eval_episodes)
+        logger.info("Evaluating for %d episodes...", self.cfg.eval.eval_episodes)
 
         # Create output directory for this eval checkpoint
         eval_dir = os.path.join(
@@ -232,7 +247,7 @@ class Trainer:
 
         successes, returns, distances = [], [], []
 
-        for ep in range(self.cfg.eval_episodes):
+        for ep in range(self.cfg.eval.eval_episodes):
             obs = self.env.reset()
             goal_obs = self._sample_goal_obs()
             ep_return = 0.0
@@ -288,7 +303,7 @@ class Trainer:
 
             logger.info(
                 "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s",
-                ep + 1, self.cfg.eval_episodes,
+                ep + 1, self.cfg.eval.eval_episodes,
                 ep_step, ep_return, dist, success,
             )
 
@@ -341,50 +356,58 @@ class Trainer:
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
-        z, actions, z_next, rewards, dones, z_goal, goal_obs_batch = \
+        z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, use_relabeled = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
                 device=self.device,
             )
+        use_relabeled_gpu = torch.BoolTensor(use_relabeled).to(self.device)
 
-        # Optionally recompute rewards with privileged function on relabeled goals
-        # (only needed when reward is privileged and goals were relabeled)
-        # For latent reward, the buffer already recomputes in latent space.
-        # For privileged reward, rewards stored in buffer are w.r.t. original goal;
-        # relabeled reward recomputation is handled below.
-        if self.cfg.reward.name == "privileged":
-            rewards = self._recompute_privileged_rewards(
-                z_next, goal_obs_batch, self.device
-            )
+
+         # Only recompute rewards for relabeled transitions
+        if use_relabeled.any():
+            if self.cfg.reward.name == "privileged":
+                relabeled_rewards = self._recompute_privileged_rewards(
+                    {k: v[use_relabeled] for k, v in next_obs.items()},  
+                    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
+                    self.device
+             )
+                rewards[use_relabeled_gpu] = relabeled_rewards
+                
+            elif self.cfg.reward.name == "latent":
+                relabeled_rewards = -torch.norm(
+                    z_next[use_relabeled_gpu] - z_goal[use_relabeled_gpu], 
+                    dim=-1, keepdim=True
+                ) * self.cfg.reward.reward_scale
+                rewards[use_relabeled_gpu] = relabeled_rewards
+
 
         return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
 
     def _recompute_privileged_rewards(
-        self, z_next, goal_obs_batch: dict, device: torch.device
+        self, next_obs: dict, goal_obs_batch: dict, device: torch.device
     ) -> torch.Tensor:
         """
         Recompute privileged rewards for a batch of relabeled goals.
         Returns a (B, 1) tensor.
         """
         key = self.cfg.reward.object_pos_key
-        pos_next = goal_obs_batch[key]          # (B, 3) — next obs positions
-        # For a relabeled goal, the "goal position" is the next_obs of the
-        # sampled goal transition.
-        # We use the same key from the goal obs batch.
-        pos_goal = goal_obs_batch[key]          # same batch, acts as goal
 
-        # distance is zero for same-index — this is handled correctly by
-        # the mixed sampling since goal is a *different* sampled transition.
-        # Re-using the batch as both is intentional for the recomputation path.
+        # Extract positions from the observation dictionaries and convert to numpy for distance computation
+        pos_next = next_obs[key]
+        pos_goal = goal_obs_batch[key]        
+
+        # Compute Euclidean distance with torch
+        #dists = torch.norm(pos_next - pos_goal, dim=-1, keepdim=True)
         dists = np.linalg.norm(
             pos_next - pos_goal, axis=-1, keepdims=True
         ).astype(np.float32)
         rewards = -dists * self.cfg.reward.reward_scale
+
         return torch.FloatTensor(rewards).to(device)
 
     def _warmup(self, obs: dict):
         """Collect random transitions to seed the replay buffer."""
-        #goal_obs = self._random_goal_obs(obs)
         step_in_ep = 0
 
         for _ in tqdm(range(self.cfg.agent.warmup_steps)):
@@ -394,22 +417,26 @@ class Trainer:
             # Dummy zero reward during warmup — buffer is just being seeded
             z = self.encoder.encode(self._single_obs(obs))
             z_next = self.encoder.encode(self._single_obs(next_obs))
+            
             self.buffer.push(
                 obs=obs,
                 z=z,
                 action=action,
                 next_obs=next_obs,
                 next_z=z_next,
-                reward=0.0,
+                reward=0.0, # 0 reward during warmup; actual rewards are computed during updates
                 done=done,
                 step_in_ep=step_in_ep,
+                z_goal=None,  # No original goal
+                goal_obs=None,
+                is_warmup=True,  # Mark as warmup
             )
+
             step_in_ep += 1
 
             if done:
                 self.buffer.end_episode()
                 obs = self.env.reset()
-                #goal_obs = self._random_goal_obs(obs)
                 step_in_ep = 0
             else:
                 obs = next_obs
