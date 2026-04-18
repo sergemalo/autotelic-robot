@@ -5,5 +5,5 @@ capacity: 10000 # Estimated size per sample: 603.82 KB (CPU) + 16.38 KB (GPU)
 # future: sample goal from future states in same episode
 # buffer: sample goal randomly from replay buffer (our default)
 # mixed: 50% future + 50% buffer
-goal_sampling_strategy: mixed
+goal_sampling_strategy: mixed 
 future_fraction: 0.5          # used when strategy is mixed

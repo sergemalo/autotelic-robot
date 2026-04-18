@@ -54,6 +54,10 @@ class ReplayBuffer:
         self._episode_ids: Optional[np.ndarray] = None
         self._step_in_eps: Optional[np.ndarray] = None
 
+        self._z_goal_original: Optional[List] = None  # Store original goals
+        self._goal_obs_original: Optional[Dict[str, np.ndarray]] = None  # For privileged reward
+        self._is_warmup: Optional[np.ndarray] = None  # Flag warmup transitions
+
         self._ptr = 0
         self._size = 0
 
@@ -92,6 +96,15 @@ class ReplayBuffer:
             self._obs[key] = np.zeros((self.capacity, *shape), dtype=dtype)
             self._next_obs[key] = np.zeros((self.capacity, *shape), dtype=dtype)
 
+
+        self._z_goal_original = [None] * self.capacity
+        self._is_warmup = np.zeros(self.capacity, dtype=bool)
+
+        # For privileged reward recomputation
+        self._goal_obs_original = {}
+        for key in obs.keys():
+            self._goal_obs_original[key] = np.zeros((self.capacity, *obs[key].shape), dtype=obs[key].dtype)
+
         logger.debug("ReplayBuffer storage initialised.")
 
     # ------------------------------------------------------------------
@@ -108,6 +121,9 @@ class ReplayBuffer:
         reward: float,
         done: bool,
         step_in_ep: int,
+        z_goal: Optional[torch.Tensor] = None, 
+        goal_obs: Optional[Dict] = None,
+        is_warmup: bool = False
     ):
         """Add a single transition."""
         if self._obs is None:
@@ -143,6 +159,14 @@ class ReplayBuffer:
         self._ptr = (self._ptr + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
 
+
+        self._is_warmup[idx] = is_warmup
+        if z_goal is not None:
+            self._z_goal_original[idx] = z_goal.squeeze(0)
+            if goal_obs is not None:
+                for key in self._goal_obs_original:
+                    self._goal_obs_original[key][idx] = goal_obs[key]
+
         if self._size == 1:
             self._log_sample_size()
 
@@ -162,72 +186,87 @@ class ReplayBuffer:
     ) -> Tuple[
         torch.Tensor,  # z        (B, latent_dim)
         torch.Tensor,  # actions  (B, action_dim)
+        Dict,          # next_obs (dict of multiple different modalities, each (B, ...))
         torch.Tensor,  # z_next   (B, latent_dim)
         torch.Tensor,  # rewards  (B, 1)
         torch.Tensor,  # dones    (B, 1)
         torch.Tensor,  # z_goal   (B, latent_dim)
         Dict,          # raw goal obs (for privileged reward recomputation)
+        np.ndarray,    # relabel mask (True if relabeled, False if original), CPU version
     ]:
         assert self._size >= batch_size, (
             f"Buffer has only {self._size} transitions, need {batch_size}."
         )
 
-        idxs = np.random.randint(0, self._size, size=batch_size)
+        idxs = np.random.randint(0, self._size, size=batch_size) # sample indices 
 
-        # Copy z tensors to [b][latent_dim]
-        z_batch = torch.stack([self._z[i] for i in idxs])
-        next_z_batch = torch.stack([self._next_z[i] for i in idxs])
+        # convert to tensors and move to device
+        z_batch = torch.stack([self._z[i] for i in idxs]).to(device)
+        next_obs_batch = {key: arr[idxs] for key, arr in self._next_obs.items()}
+        #next_obs_batch = {k: torch.FloatTensor(self._next_obs[k][idxs]).to(device) for k in self._next_obs}
+        next_z_batch = torch.stack([self._next_z[i] for i in idxs]).to(device)
         actions = torch.FloatTensor(self._actions[idxs]).to(device)
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
         dones = torch.FloatTensor(self._dones[idxs]).to(device)
 
-        # Sample goal obs according to strategy
-        z_goal_batch, goal_obs_batch = self._sample_goals(idxs)
+        #------ Goal relabeling ---------------------------------------
+        # warmup transitions are always relabeled
+        is_warmup = self._is_warmup[idxs] 
+        use_relabeled = is_warmup.copy()   # start with warmup mask (True for warmup, False for non-warmup)
 
-        # Encode
-        return z_batch, actions, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch
+        # For non-warmup: 50% keep original, 50% relabel
+        non_warmup_mask = ~is_warmup  # only consider non-warmup transitions for random relabeling
+        relabel_dice = np.random.rand(batch_size) < 0.5 # 50% chance to relabel for non-warmup transitions
+        use_relabeled[non_warmup_mask] = relabel_dice[non_warmup_mask] # combine with warmup mask to get final relabeling decision
 
-    def _sample_goals(self, idxs: np.ndarray) -> Tuple[torch.Tensor, Dict[str, np.ndarray]]:
-        """
-        For each transition index, sample a goal observation.
-        Returns a batched obs dict.
-        """
-        strategy = self.goal_sampling_strategy
-        batch_size = len(idxs)
 
-        if strategy == "buffer":
-            goal_idxs = np.random.randint(0, self._size, size=batch_size)
-
-        elif strategy == "future":
-            goal_idxs = self._sample_future_goals(idxs)
-
-        elif strategy == "mixed":
-            use_future = np.random.rand(batch_size) < self.future_fraction
-            future_idxs = self._sample_future_goals(idxs)
-            buffer_idxs = np.random.randint(0, self._size, size=batch_size)
-            goal_idxs = np.where(use_future, future_idxs, buffer_idxs)
-
-        z_goal_batch = torch.stack([self._z[i] for i in goal_idxs])
-        goal_obs_batch = {k: self._next_obs[k][goal_idxs] for k in self._next_obs}
-        return z_goal_batch, goal_obs_batch
-
-    def _sample_future_goals(self, idxs: np.ndarray) -> np.ndarray:
-        """
-        For each idx, sample a future state from the same episode.
-        Falls back to a random buffer idx if the episode has only one step.
-        """
-        goal_idxs = np.empty_like(idxs)
+        # Construct goal batches based on relabeling decisions
+        z_goal_batch = []
+        goal_obs_batch = {k: [] for k in self._next_obs}
+        
         for i, idx in enumerate(idxs):
-            ep_id = self._episode_ids[idx]
-            ep_indices = self._episode_index.get(int(ep_id), [idx])
-            step = int(self._step_in_eps[idx])
-            future = [j for j in ep_indices if self._step_in_eps[j] > step]
-            if future:
-                goal_idxs[i] = np.random.choice(future)
+            if use_relabeled[i]:
+                # Relabel: sample new goal (future or buffer)
+                goal_idx = self._sample_relabeled_goal_idx(idx)
+                z_goal_batch.append(self._z[goal_idx])
+                for key in goal_obs_batch:
+                    goal_obs_batch[key].append(self._next_obs[key][goal_idx])
             else:
-                goal_idxs[i] = np.random.randint(0, self._size)
-        return goal_idxs
+                # Keep original
+                z_goal_batch.append(self._z_goal_original[idx])
+                for key in goal_obs_batch:
+                    goal_obs_batch[key].append(self._goal_obs_original[key][idx])
+        
+        z_goal_batch = torch.stack(z_goal_batch).to(device)
+        goal_obs_batch = {k: np.array(v) for k, v in goal_obs_batch.items()}
 
+        #relabeled_mask = torch.BoolTensor(use_relabeled).to(device)
+
+        
+        return z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled
+    
+    def _sample_relabeled_goal_idx(self, idx: int) -> int:
+        """Sample either future or buffer goal (50/50 mix)."""
+        if np.random.rand() < self.future_fraction:
+            return self._sample_future_goal_idx(idx)
+        else:
+            return np.random.randint(0, self._size)
+
+    def _sample_future_goal_idx(self, idx: int) -> int:
+        """Sample from future in same episode."""
+        ep_id = self._episode_ids[idx]
+        ep_indices = self._episode_index.get(int(ep_id), [idx])
+        step = int(self._step_in_eps[idx])
+        future = [j for j in ep_indices if self._step_in_eps[j] > step]
+
+        if future: 
+            return np.random.choice(future)
+        else: # if no future (e.g. idx is from last step of episode), fall back to buffer sampling
+            return np.random.randint(0, self._size)
+
+    def reset(self):
+        self._ptr = 0
+        
     def __len__(self) -> int:
         return self._size
     

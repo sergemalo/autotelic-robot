@@ -15,9 +15,14 @@ output_dir: ${hydra:runtime.output_dir}
 checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
 checkpoint_freq: 10000        # save every N env steps
 
-total_env_steps: 100
-eval_freq: 50               # eval every N env steps
-eval_episodes: 1
+training:
+  total_env_steps: 100
+  reward_offset: 200 # to verify : we want diago of table... 
+
+eval:
+  eval_freq: 50               # eval every N env steps
+  eval_episodes: 1
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+
