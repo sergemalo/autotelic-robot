@@ -166,17 +166,15 @@ class Trainer:
                     self.episode_num,
                     episode_steps,
                     episode_return,
-                    self.env.check_success(),
+                    self.env.check_custom_success(),
                 )
 
                 self.wandb.log_scalar(
                     {
                         "episode_return": episode_return,
                         "episode_length": episode_steps,
-                        "success": float(self.env.check_success()),
-                        "latent_distance": float(
-                            torch.norm(z_next - z_goal).item()
-                        ),
+                        "success": float(self.env.check_custom_success()),
+                        "latent_distance": torch.linalg.vector_norm(z_next - z_goal).item(),
                     },
                     step=self.total_steps,
                 )
@@ -299,8 +297,8 @@ class Trainer:
             # ---- Metrics --------------------------------------------
             z_final = self.encoder.encode(self._single_obs(obs))
             z_goal_t = self.encoder.encode(self._single_obs(goal_obs))
-            dist = float(torch.norm(z_final - z_goal_t).item())
-            success = self.env.check_success()
+            dist = float(torch.linalg.vector_norm(z_final - z_goal_t).item())
+            success = self.env.check_custom_success()
 
             successes.append(float(success))
             returns.append(ep_return)
