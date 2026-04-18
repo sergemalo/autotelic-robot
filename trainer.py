@@ -200,7 +200,7 @@ class Trainer:
                 episode_steps = 0
 
             # ---- Periodic eval + checkpoint -------------------------
-            if self.total_steps % self.cfg.eval_freq == 0:
+            if self.total_steps % self.cfg.eval.eval_freq == 0:
                 eval_metrics = self.evaluate()
                 self.wandb.log_scalar(eval_metrics, self.total_steps)
 
@@ -222,13 +222,13 @@ class Trainer:
 
     def evaluate(self) -> dict:
         """
-        Run cfg.eval_episodes deterministic episodes and return metrics.
+        Run cfg.eval.eval_episodes deterministic episodes and return metrics.
 
         For each episode, saves:
           - <eval_dir>/step_<N>/ep_<E>_goal.png   — the goal image
           - <eval_dir>/step_<N>/ep_<E>_rollout.mp4 — the full episode video
         """
-        logger.info("Evaluating for %d episodes...", self.cfg.eval_episodes)
+        logger.info("Evaluating for %d episodes...", self.cfg.eval.eval_episodes)
 
         # Create output directory for this eval checkpoint
         eval_dir = os.path.join(
@@ -239,7 +239,7 @@ class Trainer:
 
         successes, returns, distances = [], [], []
 
-        for ep in range(self.cfg.eval_episodes):
+        for ep in range(self.cfg.eval.eval_episodes):
             obs = self.env.reset()
             goal_obs = self._sample_goal_obs()
             ep_return = 0.0
@@ -295,7 +295,7 @@ class Trainer:
 
             logger.info(
                 "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s",
-                ep + 1, self.cfg.eval_episodes,
+                ep + 1, self.cfg.eval.eval_episodes,
                 ep_step, ep_return, dist, success,
             )
 
@@ -348,28 +348,30 @@ class Trainer:
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
-        z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, relabeled_mask = \
+        z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, use_relabeled = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
                 device=self.device,
             )
+        use_relabeled_gpu = torch.BoolTensor(use_relabeled).to(self.device)
+
 
          # Only recompute rewards for relabeled transitions
-        if relabeled_mask.any():
+        if use_relabeled.any():
             if self.cfg.reward.name == "privileged":
                 relabeled_rewards = self._recompute_privileged_rewards(
-                    {k: v[relabeled_mask] for k, v in next_obs.items()},  
-                    {k: v[relabeled_mask] for k, v in goal_obs_batch.items()},
+                    {k: v[use_relabeled] for k, v in next_obs.items()},  
+                    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
                     self.device
              )
-                rewards[relabeled_mask] = relabeled_rewards
+                rewards[use_relabeled_gpu] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":
                 relabeled_rewards = -torch.norm(
-                    z_next[relabeled_mask] - z_goal[relabeled_mask], 
+                    z_next[use_relabeled_gpu] - z_goal[use_relabeled_gpu], 
                     dim=-1, keepdim=True
                 ) * self.cfg.reward.reward_scale
-                rewards[relabeled_mask] = relabeled_rewards
+                rewards[use_relabeled_gpu] = relabeled_rewards
 
 
         return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
@@ -388,8 +390,10 @@ class Trainer:
         pos_goal = goal_obs_batch[key]        
 
         # Compute Euclidean distance with torch
-        dists = torch.norm(pos_next - pos_goal, dim=-1, keepdim=True)
-
+        #dists = torch.norm(pos_next - pos_goal, dim=-1, keepdim=True)
+        dists = np.linalg.norm(
+            pos_next - pos_goal, axis=-1, keepdims=True
+        ).astype(np.float32)
         rewards = -dists * self.cfg.reward.reward_scale
 
         return torch.FloatTensor(rewards).to(device)

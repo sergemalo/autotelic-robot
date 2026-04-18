@@ -189,7 +189,7 @@ class ReplayBuffer:
         torch.Tensor,  # dones    (B, 1)
         torch.Tensor,  # z_goal   (B, latent_dim)
         Dict,          # raw goal obs (for privileged reward recomputation)
-        torch.tensor,  # relabel mask (True if relabeled, False if original)
+        np.ndarray,    # relabel mask (True if relabeled, False if original), CPU version
     ]:
         assert self._size >= batch_size, (
             f"Buffer has only {self._size} transitions, need {batch_size}."
@@ -199,7 +199,8 @@ class ReplayBuffer:
 
         # convert to tensors and move to device
         z_batch = torch.stack([self._z[i] for i in idxs]).to(device)
-        next_obs_batch = {k: torch.FloatTensor(self._next_obs[k][idxs]).to(device) for k in self._next_obs}
+        next_obs_batch = {key: arr[idxs] for key, arr in self._next_obs.items()}
+        #next_obs_batch = {k: torch.FloatTensor(self._next_obs[k][idxs]).to(device) for k in self._next_obs}
         next_z_batch = torch.stack([self._next_z[i] for i in idxs]).to(device)
         actions = torch.FloatTensor(self._actions[idxs]).to(device)
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
@@ -236,10 +237,10 @@ class ReplayBuffer:
         z_goal_batch = torch.stack(z_goal_batch).to(device)
         goal_obs_batch = {k: np.array(v) for k, v in goal_obs_batch.items()}
 
-        relabeled_mask = torch.BoolTensor(use_relabeled).to(device)
+        #relabeled_mask = torch.BoolTensor(use_relabeled).to(device)
 
         
-        return z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, relabeled_mask
+        return z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled
     
     def _sample_relabeled_goal_idx(self, idx: int) -> int:
         """Sample either future or buffer goal (50/50 mix)."""
