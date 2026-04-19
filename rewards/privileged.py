@@ -27,6 +27,7 @@ class PrivilegedReward(BaseReward):
         self,
         object_pos_key: str,
         reward_scale: float = 1.0,
+        reward_offset: float = 0.0,
         reward_type: str = "negative_distance",
         sparse_threshold: float = 0.05,
     ):
@@ -38,12 +39,13 @@ class PrivilegedReward(BaseReward):
             )
         self.object_pos_key = object_pos_key
         self.reward_scale = reward_scale
+        self.reward_offset = reward_offset
         self.reward_type = reward_type
         self.sparse_threshold = sparse_threshold
 
         logger.info(
-            "PrivilegedReward: key=%s, type=%s, scale=%.2f",
-            object_pos_key, reward_type, reward_scale,
+            "PrivilegedReward: key=%s, type=%s, scale=%.2f, offset=%.2f",
+            object_pos_key, reward_type, reward_scale, reward_offset,
         )
 
     def compute(
@@ -61,7 +63,7 @@ class PrivilegedReward(BaseReward):
         dist = float(np.linalg.norm(pos_next - pos_goal))
 
         if self.reward_type == "negative_distance":
-            reward = -dist
+            reward = -dist + self.reward_offset
         elif self.reward_type == "sparse":
             reward = 1.0 if dist < self.sparse_threshold else 0.0
         else:
