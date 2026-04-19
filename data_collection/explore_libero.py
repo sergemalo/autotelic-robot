@@ -104,10 +104,11 @@ def main():
     #dummy_action = [0.0, 0.0, 0.0, 0.2, 0, 0, 0] # Rotate counter-clockwise from the view of the agent
     #dummy_action = [0.0, 0.0, 0.0, 0.0, 0.2, 0, 0] # Rotate clockwise from the view from the left of the scene
     #dummy_action = [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0] # Rotate counter-clockwise from the view from the top of the scene
-    dummy_action = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.2] # Positive: close gripper, Negative: open gripper
+    dummy_action = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2] # Positive: close gripper, Negative: open gripper
     for step in range(100):
 
         obs, reward, done, info = env.step(dummy_action)
+        logger.info("gripper_qpos[0]: %f", obs["robot0_gripper_qpos"][0])
         frames.append(obs["agentview_image"][::-1, :, :])
         #dummy_action = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
 

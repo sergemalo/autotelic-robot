@@ -6,4 +6,3 @@ object_pos_key: "milk_1_pos"          # e.g. "akita_black_bowl_1_pos" — must b
 reward_scale: 1.0
 reward_type: negative_distance  # negative_distance | sparse
 sparse_threshold: 0.05        # only used when reward_type: sparse
-reward_offset: 2              # TODO: verify : we want diago of table... 

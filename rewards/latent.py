@@ -53,3 +53,10 @@ class LatentReward(BaseReward):
             raise ValueError(f"Unknown distance_metric: {self.distance_metric}")
 
         return self.reward_scale * reward
+
+    def reset(self) -> None:
+        """
+        Call at the start of each episode so rest_z re-initialises
+        correctly for the new scene / object placement.
+        """
+        pass

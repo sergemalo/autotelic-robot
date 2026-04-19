@@ -207,6 +207,7 @@ class Trainer:
                 # reset starting obs
 
                 obs = self.env.reset(goal_coordinates = self._goal.position)
+                self.reward_fn.reset()  # Reset reward function state for new episode
                 z = self.encoder.encode(self._single_obs(obs))
 
                 # reset episode return and steps
@@ -224,6 +225,7 @@ class Trainer:
                 self._goal = self.goal_ds.sample_goal()
                 self._goal_obs = self._goal.obs
                 obs = self.env.reset(goal_coordinates=self._goal.position)
+                self.reward_fn.reset()  # Reset reward function state for new episode
                 z = self.encoder.encode(self._single_obs(obs))
                 episode_return = 0.0
                 episode_steps = 0
@@ -266,6 +268,7 @@ class Trainer:
         for ep in range(self.cfg.eval.eval_episodes):
             goal = self.goal_ds.sample_goal()
             obs = self.env.reset(goal_coordinates=goal.position)
+            self.reward_fn.reset()  # Reset reward function state for new episode
             goal_obs = goal.obs
             ep_return = 0.0
             done = False

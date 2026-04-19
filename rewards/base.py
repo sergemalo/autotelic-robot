@@ -44,3 +44,11 @@ class BaseReward(ABC):
             scalar float reward
         """
         ...
+
+    @abstractmethod
+    def reset(self) -> None:
+        """
+        Call at the start of each episode so rest_z re-initialises
+        correctly for the new scene / object placement.
+        """
+        ...

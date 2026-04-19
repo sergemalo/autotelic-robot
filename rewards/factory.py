@@ -27,10 +27,6 @@ def make_reward(cfg: DictConfig) -> BaseReward:
         from rewards.privileged import PrivilegedReward
         return PrivilegedReward(
             object_pos_key=cfg.reward.object_pos_key,
-            reward_scale=cfg.reward.reward_scale,
-            reward_offset=cfg.reward.reward_offset,
-            reward_type=cfg.reward.reward_type,
-            sparse_threshold=cfg.reward.sparse_threshold,
         )
 
     if name == "latent":
