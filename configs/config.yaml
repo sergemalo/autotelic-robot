@@ -13,14 +13,13 @@ device: cuda
 
 output_dir: ${hydra:runtime.output_dir}
 checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
-checkpoint_freq: 10000        # save every N env steps
+checkpoint_freq: 1000000        # save every N env steps
 
 training:
-  total_env_steps: 100
-  reward_offset: 200 # to verify : we want diago of table... 
+  total_env_steps: 300
 
 eval:
-  eval_freq: 50               # eval every N env steps
+  eval_freq: 100               # eval every N env steps
   eval_episodes: 1
 
 # logging

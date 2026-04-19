@@ -24,6 +24,7 @@ from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
 from utils.logging_utils import WandBLogger
+from utils.seed_ctrl import set_global_seed
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,8 @@ class Trainer:
         self.device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
         logger.info("Using device: %s", self.device)
 
-        torch.manual_seed(cfg.seed)
-        np.random.seed(cfg.seed)
+        logger.info("Setting global seed: %d", cfg.seed)
+        set_global_seed(cfg.seed)
 
         # ---- Components ---------------------------------------------
         self.env = LiberoEnv(cfg)
