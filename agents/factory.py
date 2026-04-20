@@ -6,26 +6,29 @@ import logging
 import torch
 from omegaconf import DictConfig
 
+from agents.networks import PrivilegedStateEncoder
 from agents.sac import SACAgent
 
 logger = logging.getLogger(__name__)
 
 
-def make_agent(cfg: DictConfig, latent_dim: int, device: torch.device) -> SACAgent:
+def make_agent(cfg: DictConfig, device: torch.device) -> SACAgent:
     """
     Build and return a SACAgent from config.
 
     Args:
-        cfg:        full Hydra config (cfg.agent sub-config is used)
-        latent_dim: latent dim from the encoder (injected at runtime)
-        device:     torch device
+        cfg:    full Hydra config (cfg.agent and cfg.env sub-configs are used)
+        device: torch device
 
     Returns:
         SACAgent instance
     """
-    logger.info("Building SAC agent: latent_dim=%d", latent_dim)
+    obs_dim = PrivilegedStateEncoder.OBS_DIM  # 34, fixed by the encoder layout
+    logger.info("Building SAC agent: obs_dim=%d", obs_dim)
+
     return SACAgent(
-        latent_dim=latent_dim,
+        object_pos_key=cfg.reward.object_pos_key,
+        obs_dim=obs_dim,
         action_dim=cfg.env.action_dim,
         hidden_dims=list(cfg.agent.hidden_dims),
         activation=cfg.agent.activation,
@@ -37,5 +40,7 @@ def make_agent(cfg: DictConfig, latent_dim: int, device: torch.device) -> SACAge
         init_temperature=cfg.agent.init_temperature,
         target_entropy=cfg.agent.target_entropy,
         device=device,
-        pretrained_bc_path=cfg.agent.pretrained_bc_path,
+        normaliser_clip=cfg.agent.get("normaliser_clip", 10.0),
+        pretrained_bc_path=cfg.agent.get("pretrained_bc_path", None),
+        obj_to_eef_key=cfg.agent.get("obj_to_eef_key", None),
     )

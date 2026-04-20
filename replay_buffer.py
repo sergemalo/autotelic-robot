@@ -201,6 +201,7 @@ class ReplayBuffer:
         idxs = np.random.randint(0, self._size, size=batch_size) # sample indices 
 
         # convert to tensors and move to device
+        obs_batch = {key: arr[idxs] for key, arr in self._obs.items()}
         z_batch = torch.stack([self._z[i] for i in idxs]).to(device)
         next_obs_batch = {key: arr[idxs] for key, arr in self._next_obs.items()}
         #next_obs_batch = {k: torch.FloatTensor(self._next_obs[k][idxs]).to(device) for k in self._next_obs}
@@ -243,7 +244,7 @@ class ReplayBuffer:
         #relabeled_mask = torch.BoolTensor(use_relabeled).to(device)
 
         
-        return z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled
+        return obs_batch, z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled
     
     def _sample_relabeled_goal_idx(self, idx: int) -> int:
         """Sample either future or buffer goal (50/50 mix)."""

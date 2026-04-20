@@ -58,7 +58,8 @@ class Trainer:
             goal_sampling_strategy=cfg.replay_buffer.goal_sampling_strategy,
             future_fraction=cfg.replay_buffer.future_fraction,
         )
-        self.agent: SACAgent = make_agent(cfg, self.encoder.latent_dim, self.device)
+        #self.agent: SACAgent = make_agent(cfg, self.encoder.latent_dim, self.device)
+        self.agent: SACAgent = make_agent(cfg, self.device)
         self.wandb = WandBLogger(cfg)
 
         # ---- State --------------------------------------------------
@@ -112,10 +113,12 @@ class Trainer:
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
 
             # ---- Select action ---------------------------------------
-            action = self.agent.select_action(z, z_goal, deterministic=False)
+            #action = self.agent.select_action(z, z_goal, deterministic=False)
+            action = self.agent.select_action(obs, self._goal_obs, deterministic=False)
 
             # ---- Step environment ------------------------------------
             next_obs, _libero_reward, done, info = self.env.step(action)
+            logger.debug(f"Env step | next_obs: {next_obs} | info: {info}")
 
             # ---- Encode next obs -------------------------------------
             z_next = self.encoder.encode(self._single_obs(next_obs))
@@ -287,7 +290,8 @@ class Trainer:
 
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
-                action = self.agent.select_action(z, z_goal, deterministic=True)
+                #action = self.agent.select_action(z, z_goal, deterministic=True)
+                action = self.agent.select_action(obs, goal_obs, deterministic=True)
                 next_obs, _, done, _ = self.env.step(action)
 
                 r = self.reward_fn.compute(
@@ -378,7 +382,7 @@ class Trainer:
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
-        z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, use_relabeled = \
+        obs, z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, use_relabeled = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
                 device=self.device,
@@ -404,7 +408,8 @@ class Trainer:
                 rewards[use_relabeled_gpu] = relabeled_rewards
 
 
-        return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
+        #return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
+        return self.agent.update(obs, actions, next_obs, rewards, dones, goal_obs_batch)
 
     def _recompute_privileged_rewards(
         self, next_obs: dict, goal_obs_batch: dict, device: torch.device
