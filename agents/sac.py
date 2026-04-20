@@ -13,7 +13,7 @@ normalisation — it just passes obs dicts straight through.
 """
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import numpy as np
 import torch
@@ -153,20 +153,22 @@ class SACAgent:
 
     def _encode_batch_and_normalise(
         self,
-        obs_list: List[Dict[str, np.ndarray]],
-        goal_obs_list: List[Dict[str, np.ndarray]],
+        obs: Dict[str, np.ndarray],
+        goal_obs: Dict[str, np.ndarray],
         update_stats: bool = False,
     ) -> torch.Tensor:
         """
-        Encode a batch of obs dicts → optionally update normaliser stats
+        Encode a batched obs dict → optionally update normaliser stats
         → normalise → (B, obs_dim) tensor on self.device.
 
         Args:
+            obs:          Dict[str, np.ndarray] with shape (B, *feature_shape) per key
+            goal_obs:     same structure
             update_stats: if True, update RunningMeanStd with this batch
-                          (should be True only for the current-obs batch,
-                          not for next_obs, to avoid counting transitions twice).
+                          (True only for current obs, not next_obs, to avoid
+                          counting each transition twice)
         """
-        raw = self.encoder.encode_batch(obs_list, goal_obs_list)  # (B, 34) float32
+        raw = self.encoder.encode_batch(obs, goal_obs)  # (B, 34) float32
 
         if update_stats:
             self.normaliser.update(raw)
@@ -207,12 +209,12 @@ class SACAgent:
 
     def update(
         self,
-        obs:       List[Dict[str, np.ndarray]],
-        actions:   np.ndarray,                   # (B, action_dim)
-        next_obs:  List[Dict[str, np.ndarray]],
-        rewards:   np.ndarray,                   # (B,) or (B, 1)
-        dones:     np.ndarray,                   # (B,) or (B, 1)
-        goal_obs:  List[Dict[str, np.ndarray]],
+        obs:       Dict[str, np.ndarray],   # (B, *feature_shape) per key
+        actions:   np.ndarray,              # (B, action_dim)
+        next_obs:  Dict[str, np.ndarray],   # (B, *feature_shape) per key
+        rewards:   np.ndarray,              # (B,) or (B, 1)
+        dones:     np.ndarray,              # (B,) or (B, 1)
+        goal_obs:  Dict[str, np.ndarray],   # (B, *feature_shape) per key
     ) -> Dict[str, float]:
         """
         One gradient update step.
@@ -237,13 +239,8 @@ class SACAgent:
         next_states = self._encode_batch_and_normalise(next_obs, goal_obs, update_stats=False)
 
         # ── Convert remaining inputs to tensors ───────────────────────
-        actions_t = torch.tensor(
-            np.asarray(actions, dtype=np.float32), dtype=torch.float32, device=self.device
-        )
-        rewards_t = torch.tensor(
-            np.asarray(rewards, dtype=np.float32).reshape(-1, 1),
-            dtype=torch.float32, device=self.device,
-        )
+        actions_t = actions
+        rewards_t = rewards
         dones_t = torch.tensor(
             np.asarray(dones, dtype=np.float32).reshape(-1, 1),
             dtype=torch.float32, device=self.device,

@@ -207,7 +207,7 @@ class ReplayBuffer:
         next_z_batch = torch.stack([self._next_z[i] for i in idxs]).to(device)
         actions = torch.FloatTensor(self._actions[idxs]).to(device)
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
-        dones = torch.FloatTensor(self._dones[idxs]).to(device)
+        dones = self._dones[idxs]
 
         #------ Goal relabeling ---------------------------------------
         # warmup transitions are always relabeled

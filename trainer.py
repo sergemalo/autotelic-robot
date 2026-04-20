@@ -14,7 +14,7 @@ import torch
 from omegaconf import DictConfig
 from PIL import Image
 
-from agents import make_agent
+from agents.factory import make_agent
 from agents.sac import SACAgent
 from encoders import make_encoder
 from encoders.base import BaseEncoder
@@ -58,7 +58,6 @@ class Trainer:
             goal_sampling_strategy=cfg.replay_buffer.goal_sampling_strategy,
             future_fraction=cfg.replay_buffer.future_fraction,
         )
-        #self.agent: SACAgent = make_agent(cfg, self.encoder.latent_dim, self.device)
         self.agent: SACAgent = make_agent(cfg, self.device)
         self.wandb = WandBLogger(cfg)
 

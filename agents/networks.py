@@ -181,7 +181,11 @@ class PrivilegedStateEncoder:
         goal_obs: Dict[str, np.ndarray],
     ) -> np.ndarray:
         """
-        Build the raw (un-normalised) 34-float vector from one obs/goal pair.
+        Build the raw (un-normalised) state vector from a single obs/goal pair.
+
+        Args:
+            obs:      Dict[str, np.ndarray] where each value has shape (*feature_shape,)
+            goal_obs: same structure
 
         Returns:
             state: (34,) float32 array
@@ -214,14 +218,45 @@ class PrivilegedStateEncoder:
 
     def encode_batch(
         self,
-        obs_list: List[Dict[str, np.ndarray]],
-        goal_obs_list: List[Dict[str, np.ndarray]],
+        obs: Dict[str, np.ndarray],
+        goal_obs: Dict[str, np.ndarray],
     ) -> np.ndarray:
         """
-        Encode a list of obs dicts into a (B, 34) float32 array.
-        Normalisation is NOT applied — SACAgent handles that.
+        Build the raw (un-normalised) state matrix from a batched obs/goal dict.
+
+        Args:
+            obs:      Dict[str, np.ndarray] where each value has shape (B, *feature_shape)
+                      — exactly what the replay buffer produces at sample time
+            goal_obs: same structure
+
+        Returns:
+            states: (B, 34) float32 array
         """
-        return np.stack([self.encode(o, g) for o, g in zip(obs_list, goal_obs_list)])
+        joint_pos      = obs["robot0_joint_pos"].astype(np.float32)         # (B, 7)
+        joint_vel      = obs["robot0_joint_vel"].astype(np.float32)         # (B, 7)
+        gripper_qpos   = obs["robot0_gripper_qpos"][:, :1].astype(np.float32)  # (B, 1)
+        eef_pos        = obs["robot0_eef_pos"].astype(np.float32)           # (B, 3)
+        eef_quat       = obs["robot0_eef_quat"].astype(np.float32)          # (B, 4)
+        obj_pos        = obs[self.object_pos_key].astype(np.float32)        # (B, 3)
+        obj_minus_eef  = obs[self.obj_to_eef_key].astype(np.float32)        # (B, 3)
+        goal_pos       = goal_obs[self.object_pos_key].astype(np.float32)   # (B, 3)
+        goal_minus_obj = (goal_pos - obj_pos).astype(np.float32)            # (B, 3)
+
+        states = np.concatenate([
+            joint_pos,       # 7
+            joint_vel,       # 7
+            gripper_qpos,    # 1
+            eef_pos,         # 3
+            eef_quat,        # 4
+            obj_pos,         # 3
+            obj_minus_eef,   # 3
+            goal_pos,        # 3
+            goal_minus_obj,  # 3
+        ], axis=1)  # (B, 34)
+
+        assert states.shape[1] == self.OBS_DIM, \
+            f"Expected (B, {self.OBS_DIM}), got {states.shape}"
+        return states
 
 
 # ──────────────────────────────────────────────────────────────────────────────
