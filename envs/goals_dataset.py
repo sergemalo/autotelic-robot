@@ -155,11 +155,11 @@ class GoalsDataset:
         )
 
         # 3. Park the arm out of frame and settle again
-        obs = set_arm_qpos(
-            self.env._env,
-            PARK_QPOS,
-            n_settle=self.cfg.goals.n_settle,
-        )
+        #obs = set_arm_qpos(
+        #    self.env._env,
+        #    PARK_QPOS,
+        #    n_settle=self.cfg.goals.n_settle,
+        #)
 
         if obs is None:
             raise RuntimeError(
