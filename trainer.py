@@ -393,12 +393,16 @@ class Trainer:
          # Only recompute rewards for relabeled transitions
         if use_relabeled.any():
             if self.cfg.reward.name == "privileged":
-                relabeled_rewards = self._recompute_privileged_rewards(
-                    {k: v[use_relabeled] for k, v in next_obs.items()},  
-                    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
-                    self.device
-             )
-                rewards[use_relabeled_gpu] = relabeled_rewards
+
+                # Shortcut: re-compute them all.
+                rewards = self.reward_fn.compute_batch(obs, next_obs, goal_obs_batch)
+                rewards = torch.FloatTensor(rewards).to(self.device)
+                #relabeled_rewards = self._recompute_privileged_rewards(
+                #    {k: v[use_relabeled] for k, v in next_obs.items()},  
+                #    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
+                #    self.device
+                #)
+                #rewards[use_relabeled_gpu] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":
                 relabeled_rewards = -torch.norm(

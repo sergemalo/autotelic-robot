@@ -204,7 +204,6 @@ class ReplayBuffer:
         obs_batch = {key: arr[idxs] for key, arr in self._obs.items()}
         z_batch = torch.stack([self._z[i] for i in idxs]).to(device)
         next_obs_batch = {key: arr[idxs] for key, arr in self._next_obs.items()}
-        #next_obs_batch = {k: torch.FloatTensor(self._next_obs[k][idxs]).to(device) for k in self._next_obs}
         next_z_batch = torch.stack([self._next_z[i] for i in idxs]).to(device)
         actions = torch.FloatTensor(self._actions[idxs]).to(device)
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
@@ -240,8 +239,6 @@ class ReplayBuffer:
         
         z_goal_batch = torch.stack(z_goal_batch).to(device)
         goal_obs_batch = {k: np.array(v) for k, v in goal_obs_batch.items()}
-
-        #relabeled_mask = torch.BoolTensor(use_relabeled).to(device)
 
         
         return obs_batch, z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled
