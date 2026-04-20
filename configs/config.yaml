@@ -16,10 +16,10 @@ checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
 checkpoint_freq: 1000000        # save every N env steps
 
 training:
-  total_env_steps: 300
+  total_env_steps: 200000
 
 eval:
-  eval_freq: 100               # eval every N env steps
+  eval_freq: 10000               # eval every N env steps
   eval_episodes: 1
 
 # logging

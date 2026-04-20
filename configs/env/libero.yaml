@@ -1,6 +1,6 @@
 # @package _global_.env
 name: libero
-object_name: milk             # MuJoCo object name (must exist in LIBERO assets)
+object_name: chocolate_pudding             # MuJoCo object name (must exist in LIBERO assets)
 #task_suite: libero_spatial    # libero_spatial | libero_object | libero_goal | libero_10
 #task_id: 0
 camera_heights: 224
