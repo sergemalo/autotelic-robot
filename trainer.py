@@ -437,29 +437,61 @@ class Trainer:
         return torch.FloatTensor(rewards).to(device)
 
     def _warmup(self, obs: dict):
-        """Collect random transitions to seed the replay buffer."""
+        """Collect transitions to seed the replay buffer.
+
+        Option A: reward is stored as 0.0 here but the training loop always
+                recomputes privileged reward after sampling, so the stored
+                value is never used for critic updates.
+
+        Option B: instead of purely random actions, we bias the first 3 dims
+                (EEF delta) toward the object with added noise, and randomise
+                the gripper dimension independently.  This ensures a
+                meaningful fraction of warmup transitions involve the arm
+                near the object, giving the critic real signal on the
+                approach and grip_near components from the very first update.
+        """
         step_in_ep = 0
 
         for _ in tqdm(range(self.cfg.agent.warmup_steps)):
+
+            eef_pos_key = "robot0_eef_pos"
+
+            # ── Option B: biased action ───────────────────────────────────
+            eef_pos = obs[eef_pos_key]          # (3,)
+            obj_pos = obs[self.cfg.reward.object_pos_key]       # (3,)
+
+            delta = obj_pos - eef_pos
+            norm  = np.linalg.norm(delta) + 1e-6
+            direction = delta / norm                            # unit vector toward object
+
+            # Approach direction + Gaussian noise on EEF dims
             action = np.random.uniform(-1, 1, size=self.env.action_dim)
+            action[:3] = (
+                self.cfg.agent.warmup_bias_weight * direction
+                + (1.0 - self.cfg.agent.warmup_bias_weight) * np.random.randn(3)
+            )
+            action[:3] = np.clip(action[:3], -1.0, 1.0)
+            # Gripper (last dim) stays fully random — random open/close is intentional
+            action[-1] = np.random.uniform(-1, 1)
+            # ─────────────────────────────────────────────────────────────
+
             next_obs, _, done, _ = self.env.step(action)
 
-            # Dummy zero reward during warmup — buffer is just being seeded
-            z = self.encoder.encode(self._single_obs(obs))
+            z      = self.encoder.encode(self._single_obs(obs))
             z_next = self.encoder.encode(self._single_obs(next_obs))
-            
+
             self.buffer.push(
                 obs=obs,
                 z=z,
                 action=action,
                 next_obs=next_obs,
                 next_z=z_next,
-                reward=0.0, # 0 reward during warmup; actual rewards are computed during updates
+                reward=0.0,   # Option A: training loop always recomputes; this is never used
                 done=done,
                 step_in_ep=step_in_ep,
-                z_goal=None,  # No original goal
+                z_goal=None,
                 goal_obs=None,
-                is_warmup=True,  # Mark as warmup
+                is_warmup=True,
             )
 
             step_in_ep += 1
