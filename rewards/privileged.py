@@ -104,7 +104,7 @@ class PrivilegedReward(BaseReward):
         w_grip_near: float = 1.0,
         w_grasp: float = 2.0,
         w_lift: float = 1.0,
-        w_place: float = 2.0,
+        w_place: float = 1.0,
         w_success: float = 5.0,
     ):
         if object_pos_key is None:
@@ -222,7 +222,8 @@ class PrivilegedReward(BaseReward):
         r3 = grasped * np.clip(lift_height / self.max_lift_dist, 0.0, 1.0)
 
         # ── r4  place distance ────────────────────────────────────────────
-        r4 = grasped * np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0)
+        #r4 = grasped * np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0)
+        r4 = np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0)
 
         # ── r5  success ───────────────────────────────────────────────────
         r5 = (grasped * (d_place < self.success_threshold)).astype(np.float32)
