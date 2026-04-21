@@ -1,31 +1,40 @@
 """
 Privileged staged reward for pick-and-place.
 
-Five components, activated progressively.  All components are non-negative
+Six components, activated progressively.  All components are non-negative
 and normalised to [0, 1] so that weights have consistent, interpretable
 meaning across components and scenes.
 
-  r1  reach   : 1 - d_eef/max_reach_dist         always active,    ∈ [0, 1]
-  r2  grasp   : 1.0 (discrete bonus)              gated on grasp,   ∈ {0, 1}
-  r3  lift    : (obj_z - rest_z)/max_lift_dist    gated on grasp,   ∈ [0, 1]
-  r4  place   : 1 - d_place/max_place_dist        gated on grasp,   ∈ [0, 1]
-  r5  success : 1.0 (discrete bonus)              gated on grasp
-                                                  + d_place < success_threshold
+  r1       reach        : 1 - d_eef/max_reach_dist        always active,    ∈ [0, 1]
+  r1_delta reach_delta  : (d_eef_prev - d_eef) / max_reach_dist
+                                                           always active,    ∈ (-1, 1]
+                          potential-based shaping (Ng 1999); rewards moving
+                          toward the object, penalises moving away.
+  r1_5     grip_near    : proximity(eef,obj) × gripper_closure
+                                                           always active,    ∈ [0, 1]
+                          bridges the hover→grasp gap: the agent must be
+                          close AND closing the gripper to score.
+  r2       grasp        : 1.0 (discrete bonus)             gated on grasp,   ∈ {0, 1}
+  r3       lift         : (obj_z - rest_z) / max_lift_dist gated on grasp,   ∈ [0, 1]
+  r4       place        : 1 - d_place/max_place_dist       gated on grasp,   ∈ [0, 1]
+  r5       success      : 1.0 (discrete bonus)             gated on grasp
+                                                           + d_place < success_threshold
 
-Grasp is detected heuristically (no contact sensor needed):
+Grasp detection heuristic (no contact sensor needed):
   - EEF is within `grasp_radius` of the object
   - Gripper is sufficiently closed  (gripper_qpos[0] < gripper_close_threshold)
   - Object has risen above its resting z by at least `lift_threshold`
 
-Calibration note for gripper_close_threshold:
-  For this robot: open ≈ 0.040, closed ≈ 0.001  → default threshold = 0.020
+Gripper calibration note:
+  For the default LIBERO robot:  open ≈ 0.040 m,  closed ≈ 0.001 m
+  gripper_open_width default = 0.040
+  gripper_close_threshold default = 0.020  (halfway)
 
-All thresholds and weights are Hydra-configurable so you can tune without
-touching this file.  Set log level to DEBUG during early training to see
-all five components printed at every step.
+All thresholds and weights are Hydra-configurable — no need to touch this file.
+Set log level to DEBUG during early training to see all components at every step.
 """
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -38,35 +47,39 @@ class PrivilegedReward(BaseReward):
     """
     Staged dense reward for pick-and-place using ground-truth state signals.
 
-    All reward components are non-negative and normalised to [0, 1],
-    so the total reward lives in [0, w_reach + w_grasp + w_lift + w_place + w_success].
+    All reward components are non-negative (except r1_delta which can be
+    negative as a penalty), and normalised so the weights have consistent
+    meaning.
 
     Args:
-        object_pos_key:          obs-dict key for the target object position,
-                                 e.g. "akita_black_bowl_1_pos"
-        eef_pos_key:             obs-dict key for end-effector position
-        gripper_qpos_key:        obs-dict key for gripper joint positions
+        object_pos_key:           obs-dict key for target object position
+                                  e.g. "akita_black_bowl_1_pos"
+        eef_pos_key:              obs-dict key for end-effector position
+        gripper_qpos_key:         obs-dict key for gripper joint positions
 
-        -- Normalisation distances (must be > 0) --
-        max_reach_dist:          expected max EEF-to-object distance in the scene (m).
-                                 r1 = 0 when d_eef >= this value.
-        max_place_dist:          expected max object-to-goal distance (m).
-                                 r4 = 0 when d_place >= this value.
-        max_lift_dist:           height (m) at which r3 saturates to 1.
-                                 Typically the clearance height you want.
+        -- Normalisation --
+        max_reach_dist:           expected max EEF-to-object distance (m);
+                                  r1 = 0 when d_eef >= this value
+        max_place_dist:           expected max object-to-goal distance (m)
+        max_lift_dist:            height (m) at which r3 saturates to 1
 
-        -- Grasp detection --
-        grasp_radius:            max EEF-to-object distance to consider grasping (m)
-        gripper_close_threshold: gripper_qpos[0] value BELOW which the gripper
-                                 is considered closed.  Default 0.020 (halfway
-                                 between open≈0.040 and closed≈0.001).
-        lift_threshold:          minimum height above rest_z to count as lifted (m)
+        -- Gripper --
+        gripper_open_width:       qpos[0] when gripper is fully open (m)
+        grasp_radius:             max EEF-to-object distance to consider grasping (m)
+        gripper_close_threshold:  qpos[0] below which gripper is "closed"
+
+        -- Grasp / lift --
+        lift_threshold:           min rise in obj_z (m) to confirm grasp
+        success_threshold:        d_place below which episode is a success (m)
 
         -- Weights --
-        w_reach, w_grasp, w_lift, w_place, w_success
-
-        -- Success --
-        success_threshold:       object-to-goal distance (m) for the success bonus
+        w_reach:       weight for r1 (distance to object)
+        w_reach_delta: weight for r1_delta (potential-based shaping)
+        w_grip_near:   weight for r1_5 (gripper closure near object)
+        w_grasp:       weight for r2 (grasp bonus)
+        w_lift:        weight for r3 (lift height)
+        w_place:       weight for r4 (distance to goal)
+        w_success:     weight for r5 (success bonus)
     """
 
     def __init__(
@@ -74,34 +87,38 @@ class PrivilegedReward(BaseReward):
         object_pos_key: str,
         eef_pos_key: str = "robot0_eef_pos",
         gripper_qpos_key: str = "robot0_gripper_qpos",
-        # normalisation distances
+        # normalisation
         max_reach_dist: float = 0.6,
         max_place_dist: float = 0.6,
         max_lift_dist: float = 0.15,
-        # grasp detection
-        grasp_radius: float = 0.05,
+        # gripper
+        gripper_open_width: float = 0.040,
+        grasp_radius: float = 0.06,
         gripper_close_threshold: float = 0.020,
+        # grasp / lift
         lift_threshold: float = 0.02,
-        # component weights
-        w_reach: float = 1.0,
-        w_grasp: float = 5.0,
-        w_lift: float = 2.0,
-        w_place: float = 3.0,
-        w_success: float = 10.0,
-        # success criterion
         success_threshold: float = 0.05,
+        # weights
+        w_reach: float = 1.0,
+        w_reach_delta: float = 0.5,
+        w_grip_near: float = 1.0,
+        w_grasp: float = 2.0,
+        w_lift: float = 1.0,
+        w_place: float = 2.0,
+        w_success: float = 5.0,
     ):
         if object_pos_key is None:
             raise ValueError(
-                "reward.object_pos_key must be set in config. "
+                "reward.object_pos_key must be set. "
                 "Example: reward.object_pos_key=akita_black_bowl_1_pos"
             )
         for name, val in [
             ("max_reach_dist", max_reach_dist),
             ("max_place_dist", max_place_dist),
-            ("max_lift_dist",  max_lift_dist),
+            ("max_lift_dist", max_lift_dist),
+            ("gripper_open_width", gripper_open_width),
         ]:
-            if val <= 0.0:
+            if val <= 0:
                 raise ValueError(f"{name} must be > 0, got {val}")
 
         self.object_pos_key = object_pos_key
@@ -112,172 +129,213 @@ class PrivilegedReward(BaseReward):
         self.max_place_dist = max_place_dist
         self.max_lift_dist = max_lift_dist
 
+        self.gripper_open_width = gripper_open_width
         self.grasp_radius = grasp_radius
         self.gripper_close_threshold = gripper_close_threshold
+
         self.lift_threshold = lift_threshold
+        self.success_threshold = success_threshold
 
         self.w_reach = w_reach
+        self.w_reach_delta = w_reach_delta
+        self.w_grip_near = w_grip_near
         self.w_grasp = w_grasp
         self.w_lift = w_lift
         self.w_place = w_place
         self.w_success = w_success
 
-        self.success_threshold = success_threshold
-
-        # rest_z is set lazily on the first compute() call each episode.
-        # Avoids hardcoding a table height that differs across LIBERO scenes.
+        # episode state for compute() (scalar path only)
         self._rest_z: Optional[float] = None
 
-        self._max_total = w_reach + w_grasp + w_lift + w_place + w_success
         logger.info(
-            "PrivilegedReward (staged, non-negative): key=%s  "
-            "max_reach=%.2f  max_place=%.2f  max_lift=%.2f  "
-            "grasp_radius=%.3f  gripper_close_threshold=%.3f  "
-            "max_total_reward=%.1f",
+            "PrivilegedReward initialised | object_key=%s | "
+            "weights: reach=%.1f delta=%.1f grip_near=%.1f "
+            "grasp=%.1f lift=%.1f place=%.1f success=%.1f",
             object_pos_key,
-            max_reach_dist, max_place_dist, max_lift_dist,
-            grasp_radius, gripper_close_threshold,
-            self._max_total,
+            w_reach, w_reach_delta, w_grip_near,
+            w_grasp, w_lift, w_place, w_success,
         )
+
+    # ------------------------------------------------------------------
+    # Vectorized core
+    # ------------------------------------------------------------------
+
+    def _compute_vectorized(
+        self,
+        eef_pos:       np.ndarray,   # (B, 3)
+        eef_pos_prev:  np.ndarray,   # (B, 3)  — position BEFORE the step
+        obj_pos:       np.ndarray,   # (B, 3)  — object position after step
+        goal_pos:      np.ndarray,   # (B, 3)
+        gripper_qpos:  np.ndarray,   # (B, 2)
+        rest_z:        np.ndarray,   # (B,)
+    ) -> Tuple[np.ndarray, dict]:
+        """
+        Returns
+        -------
+        rewards : (B, 1) float32
+        info    : dict of (B,) arrays, one per component — useful for logging
+        """
+        B = eef_pos.shape[0]
+
+        # ── distances ────────────────────────────────────────────────────
+        d_eef      = np.linalg.norm(eef_pos - obj_pos, axis=1)          # (B,)
+        d_eef_prev = np.linalg.norm(eef_pos_prev - obj_pos, axis=1)     # (B,)
+        d_place    = np.linalg.norm(obj_pos - goal_pos, axis=1)         # (B,)
+        obj_z      = obj_pos[:, 2]                                       # (B,)
+
+        # ── gripper closure ───────────────────────────────────────────────
+        # gripper_qpos[:, 0]: 0 = closed, gripper_open_width = fully open
+        closure = np.clip(
+            1.0 - gripper_qpos[:, 0] / self.gripper_open_width,
+            0.0, 1.0,
+        )  # (B,)  1 = fully closed, 0 = fully open
+
+        # ── r1  reach ────────────────────────────────────────────────────
+        r1 = np.clip(1.0 - d_eef / self.max_reach_dist, 0.0, 1.0)
+
+        # ── r1_delta  potential-based shaping ────────────────────────────
+        # Positive when moving toward the object, negative when moving away.
+        # Guaranteed not to change the optimal policy (Ng et al. 1999).
+        r1_delta = np.clip(
+            (d_eef_prev - d_eef) / self.max_reach_dist,
+            -1.0, 1.0,
+        )
+
+        # ── r1_5  gripper closure near object ────────────────────────────
+        # proximity peaks at 1 when d_eef = 0, decays linearly to 0 at grasp_radius.
+        # The product forces the agent to be BOTH close AND closing the gripper.
+        proximity = np.clip(1.0 - d_eef / self.grasp_radius, 0.0, 1.0)
+        r1_5 = proximity * closure
+
+        # ── grasp detection ───────────────────────────────────────────────
+        lift_height = np.maximum(obj_z - rest_z, 0.0)
+        grasped = (
+            (d_eef < self.grasp_radius) &
+            (gripper_qpos[:, 0] < self.gripper_close_threshold) &
+            (lift_height > self.lift_threshold)
+        ).astype(np.float32)  # (B,)
+
+        # ── r2  grasp bonus ───────────────────────────────────────────────
+        r2 = grasped
+
+        # ── r3  lift height ───────────────────────────────────────────────
+        r3 = grasped * np.clip(lift_height / self.max_lift_dist, 0.0, 1.0)
+
+        # ── r4  place distance ────────────────────────────────────────────
+        r4 = grasped * np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0)
+
+        # ── r5  success ───────────────────────────────────────────────────
+        r5 = (grasped * (d_place < self.success_threshold)).astype(np.float32)
+
+        # ── total ─────────────────────────────────────────────────────────
+        total = (
+            self.w_reach       * r1      +
+            self.w_reach_delta * r1_delta +
+            self.w_grip_near   * r1_5    +
+            self.w_grasp       * r2      +
+            self.w_lift        * r3      +
+            self.w_place       * r4      +
+            self.w_success     * r5
+        ).astype(np.float32)  # (B,)
+
+        info = dict(
+            r1=r1, r1_delta=r1_delta, r1_5=r1_5,
+            r2=r2, r3=r3, r4=r4, r5=r5,
+            grasped=grasped,
+            d_eef=d_eef, d_place=d_place,
+        )
+
+        return total.reshape(B, 1), info
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def reset(self) -> None:
+        """Call at the start of every episode (scalar path only)."""
+        self._rest_z = None
 
     def compute(
         self,
         obs: Dict[str, np.ndarray],
         next_obs: Dict[str, np.ndarray],
         goal_obs: Dict[str, np.ndarray],
-        z=None,
-        z_next=None,
-        z_goal=None,
+        z=None, z_next=None, z_goal=None,
     ) -> float:
         """
-        Compute reward for a single transition during rollout collection.
+        Scalar reward for a single transition during environment interaction.
 
-        rest_z is lazily initialised from obs on the first call of each
-        episode — call reset() at episode start to clear it.
-
-        z / z_next / z_goal are accepted but ignored: they satisfy the
-        BaseReward interface for call sites that still pass latents.
+        Maintains `_rest_z` as episode state: call `reset()` at episode start.
         """
-        eef_pos      = np.asarray(next_obs[self.eef_pos_key],      dtype=np.float64)  # (3,)
-        obj_pos      = np.asarray(next_obs[self.object_pos_key],   dtype=np.float64)  # (3,)
-        goal_pos     = np.asarray(goal_obs[self.object_pos_key],   dtype=np.float64)  # (3,)
-        gripper_qpos = np.asarray(next_obs[self.gripper_qpos_key], dtype=np.float64)  # (2,)
+        eef_prev   = obs[self.eef_pos_key].reshape(1, 3)
+        eef        = next_obs[self.eef_pos_key].reshape(1, 3)
+        obj        = next_obs[self.object_pos_key].reshape(1, 3)
+        goal       = goal_obs[self.object_pos_key].reshape(1, 3)
+        gripper    = next_obs[self.gripper_qpos_key].reshape(1, -1)
 
         if self._rest_z is None:
-            self._rest_z = float(np.asarray(obs[self.object_pos_key], dtype=np.float64)[2])
-            logger.debug("PrivilegedReward: rest_z initialised to %.4f", self._rest_z)
+            self._rest_z = float(obs[self.object_pos_key][2])
+        rest_z = np.array([self._rest_z], dtype=np.float32)
 
-        obj_z = float(obj_pos[2])
+        reward, info = self._compute_vectorized(eef, eef_prev, obj, goal, gripper, rest_z)
 
-        # --- Grasp detection ------------------------------------------
-        d_eef          = float(np.linalg.norm(eef_pos - obj_pos))
-        gripper_closed = float(gripper_qpos[0]) < self.gripper_close_threshold
-        lifted         = (obj_z - self._rest_z) > self.lift_threshold
-        grasped        = (d_eef < self.grasp_radius) and gripper_closed and lifted
-
-        # --- Component rewards (all in [0, 1]) ------------------------
-        r1 = max(0.0, 1.0 - d_eef / self.max_reach_dist)
-        r2 = 1.0 if grasped else 0.0
-        r3 = min(1.0, max(0.0, (obj_z - self._rest_z) / self.max_lift_dist)) if grasped else 0.0
-        d_place = float(np.linalg.norm(obj_pos - goal_pos))
-        r4 = max(0.0, 1.0 - d_place / self.max_place_dist) if grasped else 0.0
-        r5 = 1.0 if (grasped and d_place < self.success_threshold) else 0.0
-
-        # --- Weighted sum ---------------------------------------------
-        reward = (
-              self.w_reach   * r1
-            + self.w_grasp   * r2
-            + self.w_lift    * r3
-            + self.w_place   * r4
-            + self.w_success * r5
-        )
-
+        scalar = float(reward.squeeze())
+        info_s = {k: float(v.squeeze()) for k, v in info.items()}
         logger.debug(
-            "reward=%.4f/%.1f | grasped=%s | "
-            "r1(reach)=%.3f  r2(grasp)=%.3f  r3(lift)=%.3f  "
-            "r4(place)=%.3f  r5(success)=%.3f | "
-            "d_eef=%.3f  d_place=%.3f  obj_z=%.3f  rest_z=%.3f  gripper=%.4f",
-            reward, self._max_total, grasped,
-            self.w_reach * r1, self.w_grasp * r2, self.w_lift * r3,
-            self.w_place * r4, self.w_success * r5,
-            d_eef, d_place, obj_z, self._rest_z, float(gripper_qpos[0]),
+            "reward=%.3f | r1=%.3f Δ=%.3f grip_near=%.3f | "
+            "r2=%.0f r3=%.3f r4=%.3f r5=%.0f | grasped=%d",
+            scalar,
+            info_s["r1"], info_s["r1_delta"], info_s["r1_5"],
+            info_s["r2"], info_s["r3"],
+            info_s["r4"], info_s["r5"],
+            int(info_s["grasped"]),
         )
-
-        return float(reward)
+        return scalar
 
     def compute_batch(
         self,
-        obs:      Dict[str, np.ndarray],
+        obs: Dict[str, np.ndarray],
         next_obs: Dict[str, np.ndarray],
         goal_obs: Dict[str, np.ndarray],
     ) -> np.ndarray:
         """
-        Compute rewards for a batch of transitions — used by HER at sample time.
+        Vectorized reward for a batch of transitions from the replay buffer.
 
         Args:
-            obs:      Dict[str, np.ndarray], each value shape (B, *feature_shape)
+            obs:      Dict where each value has shape (B, *feature_shape)
             next_obs: same structure (post-transition)
             goal_obs: same structure (relabelled goals)
 
         Returns:
-            rewards: (B, 1) float32 array
+            rewards: (B, 1) float32
 
-        rest_z is derived per-sample from obs[object_pos_key][:, 2] — the
-        object z-height at the start of each transition, which is the correct
-        resting height regardless of where in the episode the transition occurred.
+        rest_z is derived per-sample from obs[object_pos_key][:, 2],
+        i.e. the object z-height at the START of each transition.
         """
-        # --- Extract batched arrays -----------------------------------
-        eef_pos      = next_obs[self.eef_pos_key].astype(np.float64)       # (B, 3)
-        obj_pos      = next_obs[self.object_pos_key].astype(np.float64)    # (B, 3)
-        goal_pos     = goal_obs[self.object_pos_key].astype(np.float64)    # (B, 3)
-        gripper_qpos = next_obs[self.gripper_qpos_key].astype(np.float64)  # (B, 2)
-        rest_z       = obs[self.object_pos_key][:, 2].astype(np.float64)   # (B,)
+        eef_prev  = obs[self.eef_pos_key]                    # (B, 3)
+        eef       = next_obs[self.eef_pos_key]               # (B, 3)
+        obj       = next_obs[self.object_pos_key]            # (B, 3)
+        goal      = goal_obs[self.object_pos_key]            # (B, 3)
+        gripper   = next_obs[self.gripper_qpos_key]          # (B, 2)
+        rest_z    = obs[self.object_pos_key][:, 2]           # (B,)
 
-        # --- Vectorized grasp detection -------------------------------
-        d_eef          = np.linalg.norm(eef_pos - obj_pos, axis=1)                   # (B,)
-        gripper_closed = gripper_qpos[:, 0] < self.gripper_close_threshold            # (B,)
-        obj_z          = obj_pos[:, 2]                                                # (B,)
-        lifted         = (obj_z - rest_z) > self.lift_threshold                       # (B,)
-        grasped        = (d_eef < self.grasp_radius) & gripper_closed & lifted        # (B,)
-
-        # --- Vectorized reward components (all in [0, 1]) -------------
-        r1 = np.clip(1.0 - d_eef / self.max_reach_dist, 0.0, 1.0)
-
-        r2 = grasped.astype(np.float64)
-
-        height_gain = np.clip((obj_z - rest_z) / self.max_lift_dist, 0.0, 1.0)
-        r3 = np.where(grasped, height_gain, 0.0)
-
-        d_place = np.linalg.norm(obj_pos - goal_pos, axis=1)                         # (B,)
-        r4 = np.where(grasped, np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0), 0.0)
-
-        r5 = np.where(grasped & (d_place < self.success_threshold), 1.0, 0.0)
-
-        # --- Weighted sum ---------------------------------------------
-        rewards = (
-              self.w_reach   * r1
-            + self.w_grasp   * r2
-            + self.w_lift    * r3
-            + self.w_place   * r4
-            + self.w_success * r5
+        rewards, info = self._compute_vectorized(
+            eef, eef_prev, obj, goal, gripper, rest_z
         )
 
         logger.debug(
-            "compute_batch: mean_reward=%.4f/%.1f | "
-            "grasp_rate=%.2f | mean_d_eef=%.3f  mean_d_place=%.3f",
-            float(rewards.mean()), self._max_total,
-            float(grasped.mean()), float(d_eef.mean()), float(d_place.mean()),
+            "compute_batch B=%d | mean_reward=%.3f | grasp_rate=%.2f "
+            "mean_r1=%.3f mean_delta=%.3f mean_grip_near=%.3f "
+            "mean_r4=%.3f | mean_d_eef=%.3f mean_d_place=%.3f",
+            rewards.shape[0],
+            float(rewards.mean()),
+            float(info["grasped"].mean()),
+            float(info["r1"].mean()),
+            float(info["r1_delta"].mean()),
+            float(info["r1_5"].mean()),
+            float(info["r4"].mean()),
+            float(info["d_eef"].mean()),
+            float(info["d_place"].mean()),
         )
 
-        return rewards.astype(np.float32).reshape(-1, 1)
-
-    def reset(self) -> None:
-        """
-        Call at the start of each episode so rest_z re-initialises
-        correctly for the new scene / object placement.
-        """
-        self._rest_z = None
+        return rewards  # (B, 1) float32
