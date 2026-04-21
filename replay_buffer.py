@@ -57,6 +57,7 @@ class ReplayBuffer:
         self._z_goal_original: Optional[List] = None  # Store original goals
         self._goal_obs_original: Optional[Dict[str, np.ndarray]] = None  # For privileged reward
         self._is_warmup: Optional[np.ndarray] = None  # Flag warmup transitions
+        self._rest_z = np.zeros(self.capacity, dtype=np.float32)
 
         self._ptr = 0
         self._size = 0
@@ -121,7 +122,8 @@ class ReplayBuffer:
         reward: float,
         done: bool,
         step_in_ep: int,
-        z_goal: Optional[torch.Tensor] = None, 
+        rest_z: float,          # ← ADD THIS
+        z_goal: Optional[torch.Tensor] = None,
         goal_obs: Optional[Dict] = None,
         is_warmup: bool = False
     ):
@@ -161,6 +163,8 @@ class ReplayBuffer:
 
 
         self._is_warmup[idx] = is_warmup
+        self._rest_z[idx] = rest_z
+
         if z_goal is not None:
             self._z_goal_original[idx] = z_goal.squeeze(0)
             if goal_obs is not None:
@@ -239,9 +243,10 @@ class ReplayBuffer:
         
         z_goal_batch = torch.stack(z_goal_batch).to(device)
         goal_obs_batch = {k: np.array(v) for k, v in goal_obs_batch.items()}
+        rest_z_batch = self._rest_z[idxs]   # (B,) float32
 
         
-        return obs_batch, z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled
+        return obs_batch, z_batch, actions, next_obs_batch, next_z_batch, rewards, dones, z_goal_batch, goal_obs_batch, use_relabeled, rest_z_batch
     
     def _sample_relabeled_goal_idx(self, idx: int) -> int:
         """Sample either future or buffer goal (50/50 mix)."""

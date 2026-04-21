@@ -8,6 +8,7 @@ defaults:
   - goals: default
   - _self_
 
+  
 seed: 42
 device: cuda
 
@@ -17,6 +18,9 @@ checkpoint_freq: 1000000        # save every N env steps
 
 training:
   total_env_steps: 200000
+
+agent:
+  warmup_bias_weight: 0.7   # 0.0 = fully random, 1.0 = pure approach
 
 eval:
   eval_freq: 10000               # eval every N env steps

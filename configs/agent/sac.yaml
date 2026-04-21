@@ -8,11 +8,11 @@ activation: relu              # relu | tanh | elu
 # SAC hyperparameters
 actor_lr: 3.0e-4
 critic_lr: 3.0e-4
-alpha_lr: 3.0e-4
+alpha_lr: 1.0e-4
 gamma: 0.99
 tau: 0.005                    # soft target update
-init_temperature: 0.1
-target_entropy: auto          # auto → -|A|, or set manually
+init_temperature: 0.5
+target_entropy: -5.0          # auto → -|A|, or set manually
 
 # training schedule
 batch_size: 256

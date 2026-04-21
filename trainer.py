@@ -98,6 +98,7 @@ class Trainer:
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
 
         obs = self.env.reset(goal_coordinates = self._goal.position)
+        rest_z = float(obs[self.cfg.reward.object_pos_key][2])
 
         z = self.encoder.encode(self._single_obs(obs))
         z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
@@ -142,6 +143,7 @@ class Trainer:
                 reward=reward,
                 done=done,
                 step_in_ep=episode_steps,
+                rest_z=rest_z,          # Store rest_z
                 z_goal=z_goal,  # Store original goal
                 goal_obs=self._goal_obs,  # Store original goal obs
                 is_warmup=False,  # Not warmup
@@ -157,6 +159,7 @@ class Trainer:
             # update obs and z for next step
             obs = next_obs
             z = z_next
+            rest_z = float(obs[self.cfg.reward.object_pos_key][2])
 
             # ---- SAC update -----------------------------------------
             
@@ -381,7 +384,7 @@ class Trainer:
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
-        obs, z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, use_relabeled = \
+        obs, z, actions, next_obs, z_next, rewards, dones, z_goal, goal_obs_batch, use_relabeled, rest_z_batch = \
             self.buffer.sample(
                 batch_size=self.cfg.agent.batch_size,
                 device=self.device,
@@ -394,7 +397,7 @@ class Trainer:
             if self.cfg.reward.name == "privileged":
 
                 # Shortcut: re-compute them all.
-                rewards = self.reward_fn.compute_batch(obs, next_obs, goal_obs_batch)
+                rewards = self.reward_fn.compute_batch(obs, next_obs, goal_obs_batch, rest_z_batch)
                 rewards = torch.FloatTensor(rewards).to(self.device)
                 #relabeled_rewards = self._recompute_privileged_rewards(
                 #    {k: v[use_relabeled] for k, v in next_obs.items()},  
@@ -412,7 +415,11 @@ class Trainer:
 
 
         #return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
-        return self.agent.update(obs, actions, next_obs, rewards, dones, goal_obs_batch)
+        #return self.agent.update(obs, actions, next_obs, rewards, dones, goal_obs_batch)
+        metrics = self.agent.update(obs, actions, next_obs, rewards, dones, goal_obs_batch)
+        metrics["rest_z_mean"] = float(rest_z_batch.mean())
+        metrics["rest_z_std"] = float(rest_z_batch.std())        
+        return metrics
 
     def _recompute_privileged_rewards(
         self, next_obs: dict, goal_obs_batch: dict, device: torch.device
@@ -459,6 +466,7 @@ class Trainer:
             # ── Option B: biased action ───────────────────────────────────
             eef_pos = obs[eef_pos_key]          # (3,)
             obj_pos = obs[self.cfg.reward.object_pos_key]       # (3,)
+            rest_z = float(obs[self.cfg.reward.object_pos_key][2])
 
             delta = obj_pos - eef_pos
             norm  = np.linalg.norm(delta) + 1e-6
@@ -489,6 +497,7 @@ class Trainer:
                 reward=0.0,   # Option A: training loop always recomputes; this is never used
                 done=done,
                 step_in_ep=step_in_ep,
+                rest_z=rest_z,          # Store rest_z
                 z_goal=None,
                 goal_obs=None,
                 is_warmup=True,

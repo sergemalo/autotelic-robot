@@ -298,6 +298,7 @@ class PrivilegedReward(BaseReward):
         obs: Dict[str, np.ndarray],
         next_obs: Dict[str, np.ndarray],
         goal_obs: Dict[str, np.ndarray],
+        rest_z: np.ndarray,
     ) -> np.ndarray:
         """
         Vectorized reward for a batch of transitions from the replay buffer.
@@ -318,7 +319,7 @@ class PrivilegedReward(BaseReward):
         obj       = next_obs[self.object_pos_key]            # (B, 3)
         goal      = goal_obs[self.object_pos_key]            # (B, 3)
         gripper   = next_obs[self.gripper_qpos_key]          # (B, 2)
-        rest_z    = obs[self.object_pos_key][:, 2]           # (B,)
+        #rest_z    = obs[self.object_pos_key][:, 2]           # (B,)
 
         rewards, info = self._compute_vectorized(
             eef, eef_prev, obj, goal, gripper, rest_z
