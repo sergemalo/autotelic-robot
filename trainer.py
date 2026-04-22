@@ -12,7 +12,7 @@ import imageio
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from agents import make_agent
 from agents.sac import SACAgent
@@ -280,7 +280,6 @@ class Trainer:
             pbar = tqdm(total=max_steps, desc="Evaluating")
             while not done and ep_step < max_steps:
                 # Capture frame before stepping (shows state at this step)
-                frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
 
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
@@ -297,14 +296,30 @@ class Trainer:
                 )
                 ep_return += r
                 ep_step += 1
+
+                # Capture frame after reward is known so overlay values are current
+                raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
+                frames.append(self._annotate_frame(
+                    raw_frame, r,
+                    eef_pos=obs["robot0_eef_pos"],
+                    obj_pos=obs[self.cfg.reward.object_pos_key],
+                    goal_pos=goal.position,
+                ))
+
                 obs = next_obs
                 pbar.update(1)
 
             pbar.close()
 
 
-            # Capture the final frame
-            frames.append(obs[self.cfg.encoder.camera_key][::-1].copy())
+            # Capture the final frame (terminal state — reward shown as 0.0)
+            raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
+            frames.append(self._annotate_frame(
+                raw_frame, 0.0,
+                eef_pos=obs["robot0_eef_pos"],
+                obj_pos=obs[self.cfg.reward.object_pos_key],
+                goal_pos=goal.position,
+            ))
 
             # ---- Save episode video ---------------------------------
             video_path = os.path.join(eval_dir, f"ep_{ep:03d}_rollout.mp4")
@@ -368,6 +383,76 @@ class Trainer:
             writer.append_data(frame)
         writer.close()
         logger.debug("Video saved: %s (%d frames @ %d fps)", path, len(frames), fps)
+
+
+    @staticmethod
+    def _annotate_frame(
+        frame: np.ndarray,
+        reward: float,
+        eef_pos: np.ndarray,
+        obj_pos: np.ndarray,
+        goal_pos: np.ndarray,
+        font_size: int = 12,
+    ) -> np.ndarray:
+        """
+        Overlay diagnostic text on a (H, W, 3) uint8 frame.
+
+        Draws three lines in the bottom-right corner:
+          Reward:   <value>   (blue)
+          EEF-OBJ:  <dist>    (green)
+          OBJ-GOAL: <dist>    (red)
+
+        Args:
+            frame:     uint8 numpy array (H, W, 3)
+            reward:    scalar reward for the last action
+            eef_pos:   (3,) end-effector position in metres
+            obj_pos:   (3,) object position in metres
+            goal_pos:  (3,) goal position in metres
+            font_size: approximate font size in pixels
+
+        Returns:
+            Annotated uint8 numpy array (H, W, 3).
+        """
+        eef_obj_dist  = float(np.linalg.norm(eef_pos - obj_pos))
+        obj_goal_dist = float(np.linalg.norm(obj_pos - goal_pos))
+
+        lines = [
+            (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
+            (f"EEF-OBJ:  {eef_obj_dist:.2f}m", ( 80, 220,  80)),  # green
+            (f"OBJ-GOAL: {obj_goal_dist:.2f}m", (255,  80,  80)),  # red
+        ]
+
+        img = Image.fromarray(frame)
+        draw = ImageDraw.Draw(img)
+
+        # Use a truetype font if available, otherwise fall back to default bitmap
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", font_size)
+        except OSError:
+            font = ImageFont.load_default()
+
+        # Measure the widest line to anchor text to the right edge
+        padding = 4
+        line_spacing = 2
+        w, h = img.size
+
+        # Compute line heights via getbbox for accurate placement
+        sample_bbox = font.getbbox("Ag")  # (left, top, right, bottom)
+        line_h = sample_bbox[3] - sample_bbox[1] + line_spacing
+
+        total_h = line_h * len(lines) + padding
+        y = h - total_h  # start y for the first line
+
+        for text, color in lines:
+            bbox = font.getbbox(text)
+            text_w = bbox[2] - bbox[0]
+            x = w - text_w - padding
+            # Thin dark shadow for legibility on any background
+            draw.text((x + 1, y + 1), text, font=font, fill=(0, 0, 0))
+            draw.text((x, y), text, font=font, fill=color)
+            y += line_h
+
+        return np.array(img)
 
     # ------------------------------------------------------------------
     # Helpers
