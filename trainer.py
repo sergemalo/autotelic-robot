@@ -128,6 +128,7 @@ class Trainer:
                 obs=obs,
                 next_obs=next_obs,
                 goal_obs=self._goal_obs,
+                action=action,
                 z=z,
                 z_next=z_next,
                 z_goal=z_goal,
@@ -300,6 +301,7 @@ class Trainer:
                     obs=obs,
                     next_obs=next_obs,
                     goal_obs=goal_obs,
+                    action=action,
                     z=z,
                     z_next=self.encoder.encode(self._single_obs(next_obs)),
                     z_goal=z_goal,
@@ -397,14 +399,8 @@ class Trainer:
             if self.cfg.reward.name == "privileged":
 
                 # Shortcut: re-compute them all.
-                rewards = self.reward_fn.compute_batch(obs, next_obs, goal_obs_batch, rest_z_batch)
+                rewards = self.reward_fn.compute_batch(obs, next_obs, goal_obs_batch, actions, rest_z_batch)
                 rewards = torch.FloatTensor(rewards).to(self.device)
-                #relabeled_rewards = self._recompute_privileged_rewards(
-                #    {k: v[use_relabeled] for k, v in next_obs.items()},  
-                #    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
-                #    self.device
-                #)
-                #rewards[use_relabeled_gpu] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":
                 relabeled_rewards = -torch.norm(
@@ -414,34 +410,12 @@ class Trainer:
                 rewards[use_relabeled_gpu] = relabeled_rewards
 
 
-        #return self.agent.update(z, actions, z_next, rewards, dones, z_goal)
-        #return self.agent.update(obs, actions, next_obs, rewards, dones, goal_obs_batch)
-        metrics = self.agent.update(obs, actions, next_obs, rewards, dones, goal_obs_batch)
+        actions_t = torch.FloatTensor(actions).to(self.device)
+        metrics = self.agent.update(obs, actions_t, next_obs, rewards, dones, goal_obs_batch)
         metrics["rest_z_mean"] = float(rest_z_batch.mean())
         metrics["rest_z_std"] = float(rest_z_batch.std())        
         return metrics
 
-    def _recompute_privileged_rewards(
-        self, next_obs: dict, goal_obs_batch: dict, device: torch.device
-    ) -> torch.Tensor:
-        """
-        Recompute privileged rewards for a batch of relabeled goals.
-        Returns a (B, 1) tensor.
-        """
-        key = self.cfg.reward.object_pos_key
-
-        # Extract positions from the observation dictionaries and convert to numpy for distance computation
-        pos_next = next_obs[key]
-        pos_goal = goal_obs_batch[key]        
-
-        # Compute Euclidean distance with torch
-        #dists = torch.norm(pos_next - pos_goal, dim=-1, keepdim=True)
-        dists = np.linalg.norm(
-            pos_next - pos_goal, axis=-1, keepdims=True
-        ).astype(np.float32)
-        rewards = -dists * self.cfg.reward.reward_scale
-
-        return torch.FloatTensor(rewards).to(device)
 
     def _warmup(self, obs: dict):
         """Collect transitions to seed the replay buffer.

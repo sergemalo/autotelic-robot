@@ -209,7 +209,7 @@ class ReplayBuffer:
         z_batch = torch.stack([self._z[i] for i in idxs]).to(device)
         next_obs_batch = {key: arr[idxs] for key, arr in self._next_obs.items()}
         next_z_batch = torch.stack([self._next_z[i] for i in idxs]).to(device)
-        actions = torch.FloatTensor(self._actions[idxs]).to(device)
+        actions = self._actions[idxs]
         rewards = torch.FloatTensor(self._rewards[idxs]).to(device)
         dones = self._dones[idxs]
 
