@@ -472,16 +472,17 @@ class Trainer:
             norm  = np.linalg.norm(delta) + 1e-6
             direction = delta / norm                            # unit vector toward object
 
-            # Approach direction + Gaussian noise on EEF dims
-            action = np.random.uniform(-1, 1, size=self.env.action_dim)
-            action[:3] = (
+            # Approach direction + Gaussian noise on EEF translation dims
+            translation = (
                 self.cfg.agent.warmup_bias_weight * direction
                 + (1.0 - self.cfg.agent.warmup_bias_weight) * np.random.randn(3)
             )
-            action[:3] = np.clip(action[:3], -1.0, 1.0)
-            # Gripper (last dim) stays fully random — random open/close is intentional
-            action[-1] = np.random.uniform(-1, 1)
-            # ─────────────────────────────────────────────────────────────
+            translation = np.clip(translation, -1.0, 1.0)
+ 
+            # Gripper (dim 3) stays fully random — random open/close is intentional
+            gripper = np.random.uniform(-1.0, 0.0)
+ 
+            action = np.concatenate([translation, [gripper]])  # (4,)
 
             next_obs, _, done, _ = self.env.step(action)
 

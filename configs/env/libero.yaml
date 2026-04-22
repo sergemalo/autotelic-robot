@@ -6,6 +6,6 @@ object_name: chocolate_pudding             # MuJoCo object name (must exist in L
 camera_heights: 224
 camera_widths: 224
 camera_name: agentview        # agentview | robot0_eye_in_hand
-action_dim: 7                 # 6 DoF EEF delta + 1 gripper
+action_dim: 4                 # 3 DoF EEF delta + 1 gripper
 episode_length: 300           # max steps per episode
 success_threshold: 0.1        # distance threshold for success (metres)

@@ -234,7 +234,7 @@ class LiberoEnv:
         logger.info(f"RESETTING ENVIRONEMENT")
         logger.info(f"--> Goal coordinates: {self.target_pos}")
 
-        obs, _, _, _ = self._env.step([0.0] * self.action_dim)
+        obs, _, _, _ = self._env.step([0.0] * 7)
         self.obs = obs
         logger.info(f"--> Actual coordinates: {get_object_pos(obs, self.object_name)}") 
         return obs
@@ -246,14 +246,30 @@ class LiberoEnv:
         Step the environment.
 
         Args:
-            action: (action_dim,) array in [-1, 1]
+            action: (action_dim,) array in [-1, 1].
+                    When action_dim=4, the layout is:
+                        [0] dx  — EEF x translation
+                        [1] dy  — EEF y translation
+                        [2] dz  — EEF z translation
+                        [3]     — gripper open/close
+                    Rotation dims 3-5 of the 7-DOF action are fixed to 0,
+                    reducing the action space without affecting task performance
+                    for axis-aligned pick-and-place.
+                    When action_dim=7, the action is passed through unchanged.
 
         Returns:
             (next_obs, reward, done, info)
             Note: reward here is LIBERO's sparse +1 success reward.
                   Your reward function replaces/augments this externally.
         """
-        obs, reward, done, info = self._env.step(action.tolist())
+        if len(action) == 4:
+            full_action = np.zeros(7, dtype=np.float32)
+            full_action[0:3] = action[0:3]  # EEF translation
+            full_action[6]   = action[3]    # gripper (rotation dims 3-5 stay 0)
+        else:
+            full_action = action
+
+        obs, reward, done, info = self._env.step(full_action.tolist())
         self.episode_step += 1
 
         done = self.check_custom_success(obs)
@@ -372,9 +388,10 @@ class LiberoEnv:
 
         sim.forward()
 
-        # Settle physics with no-op steps
+        # Settle physics with no-op steps — always send full 7D action
+        # directly to the underlying env, bypassing the remapping in self.step()
         obs = None
-        dummy = [0.0] * self.action_dim
+        dummy = [0.0] * 7
         for _ in range(n_settle):
             obs, _, _, _ = self._env.step(dummy)
 
