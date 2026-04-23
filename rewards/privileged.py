@@ -277,7 +277,7 @@ class PrivilegedReward(BaseReward):
         r3 = grasp_confidence * np.clip(lift_height / self.max_lift_dist, 0.0, 1.0)
 
         # ── r4  place distance ────────────────────────────────────────────
-        r4 = np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0)
+        r4 = grasp_confidence * np.clip(1.0 - d_place / self.max_place_dist, 0.0, 1.0)
 
         # ── r5  success ───────────────────────────────────────────────────
         # Hard threshold is intentional: success is binary.
