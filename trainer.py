@@ -313,10 +313,14 @@ class Trainer:
 
                 # Capture frame after reward is known so overlay values are current
                 raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
+                if self.cfg.env.name == "libero_object":
+                    obj_pos = obs[self.cfg.reward.object_pos_key]
+                else:                    
+                    obj_pos = None 
                 frames.append(self._annotate_frame(
                     raw_frame, r,
                     eef_pos=obs["robot0_eef_pos"],
-                    obj_pos=obs[self.cfg.reward.object_pos_key],
+                    obj_pos=obj_pos,
                     goal_pos=goal.position,
                 ))
 
@@ -329,10 +333,14 @@ class Trainer:
             # Capture the final frame (terminal state — reward shown as 0.0)
             success = self.env.check_custom_success(obs)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
+            if self.cfg.env.name == "libero_object":
+                obj_pos = obs[self.cfg.reward.object_pos_key]
+            else:                    
+                obj_pos = None 
             last_frame = self._annotate_frame(
                 raw_frame, 0.0,
                 eef_pos=obs["robot0_eef_pos"],
-                obj_pos=obs[self.cfg.reward.object_pos_key],
+                obj_pos=obj_pos,
                 goal_pos=goal.position,
                 success=success,
             )
@@ -435,14 +443,21 @@ class Trainer:
         Returns:
             Annotated uint8 numpy array (H, W, 3).
         """
-        eef_obj_dist  = float(np.linalg.norm(eef_pos - obj_pos))
-        obj_goal_dist = float(np.linalg.norm(obj_pos - goal_pos))
+        if obj_pos is None:
+            eef_goal_dist  = float(np.linalg.norm(eef_pos - goal_pos))
+            lines = [
+                (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
+                (f"EEF-GOAL: {eef_goal_dist:.2f}m", ( 80, 220,  80)),  # green
+            ]
+        else:
+            eef_obj_dist  = float(np.linalg.norm(eef_pos - obj_pos))
+            obj_goal_dist = float(np.linalg.norm(obj_pos - goal_pos))
 
-        lines = [
-            (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
-            (f"EEF-OBJ:  {eef_obj_dist:.2f}m", ( 80, 220,  80)),  # green
-            (f"OBJ-GOAL: {obj_goal_dist:.2f}m", (255,  80,  80)),  # red
-        ]
+            lines = [
+                (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
+                (f"EEF-OBJ:  {eef_obj_dist:.2f}m", ( 80, 220,  80)),  # green
+                (f"OBJ-GOAL: {obj_goal_dist:.2f}m", (255,  80,  80)),  # red
+            ]
 
         img = Image.fromarray(frame)
         draw = ImageDraw.Draw(img)

@@ -1,6 +1,6 @@
 defaults:
   - encoder: r3m
-  - reward: privileged
+  - reward: latent
   - agent: sac
   - replay_buffer: default
   - env: libero_arm

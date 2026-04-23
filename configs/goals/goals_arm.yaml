@@ -1,5 +1,5 @@
 # @package _global_.goals
-n_goals: 20
+n_goals: 5
 n_settle: 50
 camera_key: agentview_image
 
