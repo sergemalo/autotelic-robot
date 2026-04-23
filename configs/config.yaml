@@ -3,9 +3,9 @@ defaults:
   - reward: privileged
   - agent: sac
   - replay_buffer: default
-  - env: libero
+  - env: libero_arm
   - wandb: default
-  - goals: default
+  - goals: goals_arm
   - _self_
 
 seed: 42

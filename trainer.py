@@ -18,8 +18,8 @@ from agents import make_agent
 from agents.sac import SACAgent
 from encoders import make_encoder
 from encoders.base import BaseEncoder
-from envs.libero_env import LiberoEnv, get_object_pos
-from envs.goals_dataset import GoalSample, GoalsDataset
+from envs.libero_env import LiberoObjectEnv, LiberoArmEnv, get_object_pos
+from envs.goals_dataset import GoalSample, ObjectGoalsDataset, ArmGoalsDataset
 from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
@@ -27,6 +27,16 @@ from utils.logging_utils import WandBLogger
 from utils.seed_ctrl import set_global_seed
 
 logger = logging.getLogger(__name__)
+
+
+_ENV_CLASSES = {
+    "libero_object": LiberoObjectEnv,
+    "libero_arm": LiberoArmEnv,
+}
+_GOALS_CLASSES = {
+    "libero_object": ObjectGoalsDataset,
+    "libero_arm":    ArmGoalsDataset,
+}
 
 
 class Trainer:
@@ -50,7 +60,10 @@ class Trainer:
         set_global_seed(cfg.seed)
 
         # ---- Components ---------------------------------------------
-        self.env = LiberoEnv(cfg)
+        #self.env = LiberoEnv(cfg)
+        self.env = _ENV_CLASSES[cfg.env.name](cfg)
+        #self.env = hydra.utils.instantiate(cfg.env, cfg=cfg)
+
         self.encoder: BaseEncoder = make_encoder(cfg, self.device)
         self.reward_fn: BaseReward = make_reward(cfg)
         self.buffer = ReplayBuffer(
@@ -67,7 +80,9 @@ class Trainer:
 
         # ---- Goal management -----------------------------------------
         # Geneate Goal Dataset
-        self.goal_ds = GoalsDataset(cfg, self.env)
+        #self.goal_ds = GoalsDataset(cfg, self.env)
+        self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
+
         self.goal_ds.generate()
 
         # Current goal obs — sampled from buffer or set at episode start
@@ -93,7 +108,6 @@ class Trainer:
         # Set a goal for the first episode
         self._goal = self.goal_ds.sample_goal()
         self._goal_obs = self._goal.obs
-        self._goal.save_image_to_file(os.path.join(self.cfg.output_dir, "goal_image_0.png"))
 
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
 
