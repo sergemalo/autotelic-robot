@@ -1,9 +1,12 @@
 # @package _global_.env
-# Arm reaching task — no object, robot moves EEF to a target position.
+# Arm reaching task — no object, robot moves EEF to a target pose.
 name: libero_arm
 camera_heights: 224
 camera_widths: 224
 camera_name: agentview
-action_dim: 7                 # 6 DoF EEF delta + 1 gripper
-episode_length: 300
-success_threshold: 0.05       # metres (tighter — EEF control is more precise)
+action_dim: 7                    # 6 DoF EEF delta + 1 gripper
+episode_length: 150
+ 
+# Success requires BOTH conditions to be true simultaneously.
+success_pos_threshold: 0.05      # metres     (~5 cm)
+success_ori_threshold: 0.2       # radians    (~11 degrees)

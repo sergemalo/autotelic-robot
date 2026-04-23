@@ -1,5 +1,5 @@
 # @package _global_.goals
-n_goals: 5
+n_goals: 20
 n_settle: 50
 camera_key: agentview_image
 
@@ -7,10 +7,10 @@ camera_key: agentview_image
 # These are safe starting values — tune by visually inspecting generated goals.
 # Gripper joints are not listed here; they are always held open.
 joint_limits:
-  j1: [-0.1,  0.1]   # base rotation
-  j2: [-0.6,  -0.5]   # shoulder (negative = forward/down)
-  j3: [-0.1,  0.1]   # elbow rotation
-  j4: [1.0,  3.1]   # elbow flex
-  j5: [-0.01,  0.01]   # wrist rotation
-  j6: [ 0.01,  0.01]   # wrist flex
-  j7: [-0.01,  0.01]   # wrist roll
+  j1: [0.01,  0.02]   # base rotation
+  j2: [0.91,  0.92]   # shoulder (negative = forward/down)
+  j3: [0.01,  0.02]   # elbow rotation
+  j4: [2.2,  2.21]   # elbow flex
+  j5: [-1.57,  1.57]   # wrist rotation
+  j6: [ 0.01,  1.57]   # wrist flex
+  j7: [ 0.01,  1.57]   # wrist roll

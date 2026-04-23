@@ -8,6 +8,7 @@ Class hierarchy:
 """
 import logging
 import tempfile
+from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -164,6 +165,27 @@ def set_arm_qpos(env, qpos: np.ndarray, n_settle: int = 50):
 
 
 # ---------------------------------------------------------------------------
+# SuccessInfo
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SuccessInfo:
+    """
+    Returned by check_custom_success() in all LiberoEnv subclasses.
+
+    Fields:
+        success   whether the success condition is met
+        pos_err   L2 position error in metres (object xyz or EEF xyz)
+        ori_err   angular orientation error in radians
+                    - LiberoObjectEnv: always 0.0 (orientation not checked)
+                    - LiberoArmEnv:    EEF quaternion error
+    """
+    success: bool
+    pos_err: float
+    ori_err: float = 0.0
+
+
+# ---------------------------------------------------------------------------
 # Object position helper
 # ---------------------------------------------------------------------------
 
@@ -199,7 +221,7 @@ class LiberoEnv:
     Subclasses must implement:
       - _make_bddl() -> str          path to a written BDDL file
       - reset() -> obs dict
-      - check_custom_success(obs) -> bool
+      - check_custom_success(obs) -> SuccessInfo
     """
 
     def __init__(self, cfg: DictConfig):
@@ -208,7 +230,6 @@ class LiberoEnv:
         self.cfg = cfg
         self.episode_step = 0
         self.action_dim = cfg.env.action_dim
-        self.success_threshold = cfg.env.success_threshold
         self.obs: Optional[Dict[str, np.ndarray]] = None
 
         bddl_path = self._make_bddl()
@@ -232,7 +253,7 @@ class LiberoEnv:
     def reset(self, goal_coordinates: np.ndarray = None) -> Dict[str, np.ndarray]:
         raise NotImplementedError
 
-    def check_custom_success(self, obs: dict) -> bool:
+    def check_custom_success(self, obs: dict) -> SuccessInfo:
         raise NotImplementedError
 
     def step(
@@ -250,14 +271,21 @@ class LiberoEnv:
         obs, reward, done, info = self._env.step(action.tolist())
         self.episode_step += 1
 
-        done = self.check_custom_success(obs)
+        success_info = self.check_custom_success(obs)
 
         truncated = self.episode_step >= self.cfg.env.episode_length
         if truncated:
             logger.info("TRUNCATED")
 
-        done = done or truncated
+        if success_info.success:
+            logger.info(
+                "SUCCESS pos_err=%.4f m  ori_err=%.4f rad",
+                success_info.pos_err, success_info.ori_err,
+            )
+
+        done = success_info.success or truncated
         self.obs = obs
+        info["success_info"] = success_info
         return obs, float(reward), done, info
 
     def check_success(self) -> bool:
@@ -286,6 +314,7 @@ class LiberoObjectEnv(LiberoEnv):
     def __init__(self, cfg: DictConfig):
         self.object_name = cfg.env.object_name
         self.target_pos = np.zeros(3)
+        self.success_threshold = cfg.env.success_threshold
         super().__init__(cfg)
 
     def _make_bddl(self) -> str:
@@ -311,15 +340,13 @@ class LiberoObjectEnv(LiberoEnv):
         logger.info("--> Object position: %s", get_object_pos(obs, self.object_name))
         return obs
 
-    def check_custom_success(self, obs: dict) -> bool:
+    def check_custom_success(self, obs: dict) -> SuccessInfo:
         obj_pos = get_object_pos(obs, self.object_name)
         if obj_pos is None:
-            return False
-        dist = np.linalg.norm(obj_pos - self.target_pos)
-        if dist < self.success_threshold:
-            logger.info("SUCCESS: object reached target. dist=%.4f m", dist)
-            return True
-        return False
+            return SuccessInfo(success=False, pos_err=float("inf"))
+        pos_err = float(np.linalg.norm(obj_pos - self.target_pos))
+        success = pos_err < self.cfg.env.success_threshold
+        return SuccessInfo(success=success, pos_err=pos_err)
 
     def set_object_position(
         self,
@@ -385,44 +412,71 @@ class LiberoObjectEnv(LiberoEnv):
 class LiberoArmEnv(LiberoEnv):
     """
     No-object arm reaching task.
-    The robot must move its end-effector to a target (x, y, z) position.
+    The robot must move its end-effector to a target pose (position + orientation).
 
-    Success is measured as the L2 distance between the EEF position
-    (read from obs["robot0_eef_pos"]) and the target.
+    Success requires both conditions to be true simultaneously:
+        - L2 position error  < cfg.env.success_pos_threshold  (metres)
+        - Angular orientation error < cfg.env.success_ori_threshold  (radians)
+
+    Orientation error is computed from the quaternion dot product, with the
+    abs() handling the quaternion double-cover (q and -q are the same rotation):
+        angular_error = arccos(clip(|q_current · q_goal|, 0, 1))
 
     Config keys used (cfg.env):
-        success_threshold  distance threshold for success (metres)
+        success_pos_threshold   metres  (e.g. 0.05)
+        success_ori_threshold   radians (e.g. 0.2  ≈ 11 degrees)
     """
 
     def __init__(self, cfg: DictConfig):
-        self.target_pos = np.zeros(3)
+        self.target_pos  = np.zeros(3)   # EEF xyz
+        self.target_quat = np.array([1.0, 0.0, 0.0, 0.0])  # EEF quaternion (w,x,y,z)
         super().__init__(cfg)
 
     def _make_bddl(self) -> str:
         return write_arm_bddl()
 
-    def reset(self, goal_coordinates: np.ndarray = None) -> Dict[str, np.ndarray]:
+    def reset(
+        self,
+        goal_coordinates: np.ndarray = None,   # (3,)  EEF xyz
+        goal_quat: np.ndarray = None,           # (4,)  EEF quaternion
+    ) -> Dict[str, np.ndarray]:
         self._env.reset()
         self._env.set_init_state(self._init_state)
         self.episode_step = 0
+
         if goal_coordinates is not None:
-            self.target_pos = goal_coordinates
+            self.target_pos = np.array(goal_coordinates)
+        if goal_quat is not None:
+            self.target_quat = np.array(goal_quat)
 
         logger.info("RESETTING LiberoArmEnv")
-        logger.info("--> Goal EEF position: %s", self.target_pos)
+        logger.info("--> Goal EEF position:    %s", self.target_pos)
+        logger.info("--> Goal EEF quaternion:  %s", self.target_quat)
 
         obs, _, _, _ = self._env.step([0.0] * self.action_dim)
         self.obs = obs
         logger.info("--> Current EEF position: %s", obs.get("robot0_eef_pos"))
+        logger.info("--> Current EEF quat:     %s", obs.get("robot0_eef_quat"))
         return obs
 
-    def check_custom_success(self, obs: dict) -> bool:
+    def check_custom_success(self, obs: dict) -> SuccessInfo:
+        # --- position ---
         eef_pos = obs.get("robot0_eef_pos")
         if eef_pos is None:
             logger.warning("'robot0_eef_pos' not in obs — cannot check success.")
-            return False
-        dist = np.linalg.norm(np.array(eef_pos) - self.target_pos)
-        if dist < self.success_threshold:
-            logger.info("SUCCESS: EEF reached target. dist=%.4f m", dist)
-            return True
-        return False
+            return SuccessInfo(success=False, pos_err=float("inf"), ori_err=float("inf"))
+        pos_err = float(np.linalg.norm(np.array(eef_pos) - self.target_pos))
+
+        # --- orientation ---
+        eef_quat = obs.get("robot0_eef_quat")
+        if eef_quat is None:
+            logger.warning("'robot0_eef_quat' not in obs — cannot check success.")
+            return SuccessInfo(success=False, pos_err=pos_err, ori_err=float("inf"))
+        dot = np.abs(np.dot(np.array(eef_quat), self.target_quat))
+        ori_err = float(np.arccos(np.clip(dot, 0.0, 1.0)))
+
+        success = (
+            pos_err < self.cfg.env.success_pos_threshold
+            and ori_err < self.cfg.env.success_ori_threshold
+        )
+        return SuccessInfo(success=success, pos_err=pos_err, ori_err=ori_err)

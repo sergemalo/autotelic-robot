@@ -20,13 +20,14 @@ Usage:
     goal = dataset.sample_goal()
     goal.image       # uint8 (H, W, 3)
     goal.position    # float32 (3,)  world-frame xyz of EEF
+    goal.quat        # float32 (4,)  EEF quaternion (w, x, y, z)
 """
 import logging
 from dataclasses import dataclass
-import os
 from typing import Dict, List, Optional
 from tqdm import tqdm
 from PIL import Image
+import os
 
 import numpy as np
 from omegaconf import DictConfig
@@ -50,10 +51,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GoalSample:
-    """A single goal: the image the agent should reach and the target position."""
-    obs: Dict[str, np.ndarray]  # full obs dict
-    image: np.ndarray           # uint8 (H, W, 3)
-    position: np.ndarray        # float32 (3,)  world-frame xyz
+    """
+    A single goal: the image the agent should reach and the target pose.
+
+    Fields:
+        obs       full obs dict (image + proprio + positions)
+        image     uint8 (H, W, 3)
+        position  float32 (3,)   world-frame xyz
+                    - object task: object position
+                    - arm task:    EEF position
+        quat      float32 (4,) or None
+                    - object task: None  (object orientation not used)
+                    - arm task:    EEF quaternion (w, x, y, z)
+    """
+    obs: Dict[str, np.ndarray]
+    image: np.ndarray
+    position: np.ndarray                  # float32 (3,)
+    quat: Optional[np.ndarray] = None     # float32 (4,) or None
 
     def save_image_to_file(self, image_path: str) -> None:
         Image.fromarray(self.image[::-1]).save(image_path)
@@ -202,13 +216,16 @@ _DEFAULT_JOINT_LIMITS = {
 
 class ArmGoalsDataset(GoalsDataset):
     """
-    Goals defined by a random arm (EEF) position.
+    Goals defined by a random arm pose (EEF position + orientation).
 
     Generation procedure per goal:
         1. Reset the environment.
         2. Sample random joint angles within per-joint limits.
         3. Teleport the arm via set_arm_qpos().
-        4. Capture agentview image + read EEF position from obs["robot0_eef_pos"].
+        4. Capture agentview image + read EEF position and quaternion from obs.
+
+    GoalSample.position  float32 (3,)  EEF xyz
+    GoalSample.quat      float32 (4,)  EEF quaternion (w, x, y, z)
 
     The gripper is held open (matches PARK_QPOS convention).
 
@@ -256,6 +273,7 @@ class ArmGoalsDataset(GoalsDataset):
             # Temp - write each goal image to file for debugging
             goal.save_image_to_file(os.path.join(self.cfg.output_dir, f"arm_goal_{i}.png"))
 
+
         # Restore neutral pose after generation
         set_arm_qpos(self.env._env, NEUTRAL_QPOS, n_settle=self.cfg.goals.n_settle)
         self.env.reset()
@@ -282,6 +300,7 @@ class ArmGoalsDataset(GoalsDataset):
 
         image = obs[self._camera_key].copy()
 
+        # EEF position
         eef_pos = obs.get("robot0_eef_pos")
         if eef_pos is None:
             raise RuntimeError(
@@ -290,8 +309,18 @@ class ArmGoalsDataset(GoalsDataset):
             )
         position = np.array(eef_pos, dtype=np.float32)
 
+        # EEF orientation
+        eef_quat = obs.get("robot0_eef_quat")
+        if eef_quat is None:
+            raise RuntimeError(
+                "'robot0_eef_quat' not found in obs. "
+                f"Available keys: {sorted(obs.keys())}"
+            )
+        quat = np.array(eef_quat, dtype=np.float32)
+
         logger.debug(
-            "Arm goal captured: joints=%s, eef=(%.4f, %.4f, %.4f)",
+            "Arm goal captured: joints=%s, eef=(%.4f, %.4f, %.4f), quat=%s",
             np.round(joint_angles, 3), position[0], position[1], position[2],
+            np.round(quat, 3),
         )
-        return GoalSample(obs=obs, image=image, position=position)
+        return GoalSample(obs=obs, image=image, position=position, quat=quat)

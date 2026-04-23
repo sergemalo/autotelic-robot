@@ -190,14 +190,14 @@ class Trainer:
                     self.episode_num,
                     episode_steps,
                     episode_return,
-                    self.env.check_custom_success(obs),
+                    self.env.check_custom_success(obs).success,
                 )
 
                 self.wandb.log_scalar(
                     {
                         "episode_return": episode_return,
                         "episode_length": episode_steps,
-                        "success": float(self.env.check_custom_success(obs)),
+                        "success": float(self.env.check_custom_success(obs).success),
                         "latent_distance": torch.linalg.vector_norm(z_next - z_goal).item(),
                     },
                     step=self.total_steps,
@@ -298,7 +298,8 @@ class Trainer:
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
                 action = self.agent.select_action(z, z_goal, deterministic=True)
-                next_obs, _, done, _ = self.env.step(action)
+                next_obs, _, done, info = self.env.step(action)
+                success_info = info['success_info'] if 'success_info' in info else None
 
                 r = self.reward_fn.compute(
                     obs=obs,
@@ -322,6 +323,7 @@ class Trainer:
                     eef_pos=obs["robot0_eef_pos"],
                     obj_pos=obj_pos,
                     goal_pos=goal.position,
+                    info=success_info,
                 ))
 
                 obs = next_obs
@@ -331,7 +333,7 @@ class Trainer:
 
 
             # Capture the final frame (terminal state — reward shown as 0.0)
-            success = self.env.check_custom_success(obs)
+            info = self.env.check_custom_success(obs)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
             if self.cfg.env.name == "libero_object":
                 obj_pos = obs[self.cfg.reward.object_pos_key]
@@ -342,7 +344,7 @@ class Trainer:
                 eef_pos=obs["robot0_eef_pos"],
                 obj_pos=obj_pos,
                 goal_pos=goal.position,
-                success=success,
+                info=info,
             )
             for _ in range(10):  # Show final frame for a few frames at the end of the video
                 frames.append(last_frame)
@@ -356,14 +358,14 @@ class Trainer:
             z_goal_t = self.encoder.encode(self._single_obs(goal_obs))
             dist = float(torch.linalg.vector_norm(z_final - z_goal_t).item())
 
-            successes.append(float(success))
+            successes.append(float(info.success))
             returns.append(ep_return)
             distances.append(dist)
 
             logger.info(
                 "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s",
                 ep + 1, self.cfg.eval.eval_episodes,
-                ep_step, ep_return, dist, success,
+                ep_step, ep_return, dist, info.success,
             )
 
             # ---- Log to WandB ---------------------------------------
@@ -418,7 +420,7 @@ class Trainer:
         obj_pos: np.ndarray,
         goal_pos: np.ndarray,
         font_size: int = 12,
-        success: Optional[bool] = None,
+        info = None,
     ) -> np.ndarray:
         """
         Overlay diagnostic text on a (H, W, 3) uint8 frame.
@@ -447,7 +449,9 @@ class Trainer:
             eef_goal_dist  = float(np.linalg.norm(eef_pos - goal_pos))
             lines = [
                 (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
-                (f"EEF-GOAL: {eef_goal_dist:.2f}m", ( 80, 220,  80)),  # green
+                (f"Pos err: {info.pos_err:.2f}m", (255,  80,  80)),  # red
+                (f"Ori err: {info.ori_err:.2f}rad", (255,  80,  80)),  # red
+                
             ]
         else:
             eef_obj_dist  = float(np.linalg.norm(eef_pos - obj_pos))
@@ -486,16 +490,15 @@ class Trainer:
             draw.text((x, y), text, font=font, fill=color)
             y += line_h
 
-        # ---- Top-right: success/fail label (final frame only) ----------
-        if success is not None:
-            label = "SUCCESS!" if success else "FAIL"
-            color = (80, 220, 80) if success else (255, 80, 80)
-            bbox = font.getbbox(label)
-            text_w = bbox[2] - bbox[0]
-            x = w - text_w - padding
-            y = padding
-            draw.text((x + 1, y + 1), label, font=font, fill=(0, 0, 0))
-            draw.text((x, y), label, font=font, fill=color)
+        # ---- Top-right: success/fail label ----------
+        label = "SUCCESS!" if info.success else "FAIL"
+        color = (80, 220, 80) if info.success else (255, 80, 80)
+        bbox = font.getbbox(label)
+        text_w = bbox[2] - bbox[0]
+        x = w - text_w - padding
+        y = padding
+        draw.text((x + 1, y + 1), label, font=font, fill=(0, 0, 0))
+        draw.text((x, y), label, font=font, fill=color)
 
         return np.array(img)
 

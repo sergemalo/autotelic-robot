@@ -13,7 +13,7 @@ device: cuda
 
 output_dir: ${hydra:runtime.output_dir}
 checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
-checkpoint_freq: 1000000        # save every N env steps
+checkpoint_freq: 100000        # save every N env steps
 
 training:
   total_env_steps: 300
