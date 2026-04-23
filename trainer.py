@@ -313,13 +313,17 @@ class Trainer:
 
 
             # Capture the final frame (terminal state — reward shown as 0.0)
+            success = self.env.check_custom_success(obs)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
-            frames.append(self._annotate_frame(
+            last_frame = self._annotate_frame(
                 raw_frame, 0.0,
                 eef_pos=obs["robot0_eef_pos"],
                 obj_pos=obs[self.cfg.reward.object_pos_key],
                 goal_pos=goal.position,
-            ))
+                success=success,
+            )
+            for _ in range(10):  # Show final frame for a few frames at the end of the video
+                frames.append(last_frame)
 
             # ---- Save episode video ---------------------------------
             video_path = os.path.join(eval_dir, f"ep_{ep:03d}_rollout.mp4")
@@ -329,7 +333,6 @@ class Trainer:
             z_final = self.encoder.encode(self._single_obs(obs))
             z_goal_t = self.encoder.encode(self._single_obs(goal_obs))
             dist = float(torch.linalg.vector_norm(z_final - z_goal_t).item())
-            success = self.env.check_custom_success(obs)
 
             successes.append(float(success))
             returns.append(ep_return)
@@ -393,14 +396,18 @@ class Trainer:
         obj_pos: np.ndarray,
         goal_pos: np.ndarray,
         font_size: int = 12,
+        success: Optional[bool] = None,
     ) -> np.ndarray:
         """
         Overlay diagnostic text on a (H, W, 3) uint8 frame.
 
-        Draws three lines in the bottom-right corner:
+        Bottom-right corner (all frames):
           Reward:   <value>   (blue)
           EEF-OBJ:  <dist>    (green)
           OBJ-GOAL: <dist>    (red)
+
+        Top-right corner (final frame only, when success is not None):
+          "SUCCESS!" in green  or  "FAIL" in red
 
         Args:
             frame:     uint8 numpy array (H, W, 3)
@@ -409,6 +416,7 @@ class Trainer:
             obj_pos:   (3,) object position in metres
             goal_pos:  (3,) goal position in metres
             font_size: approximate font size in pixels
+            success:   if not None, draw outcome label in the top-right corner
 
         Returns:
             Annotated uint8 numpy array (H, W, 3).
@@ -431,26 +439,34 @@ class Trainer:
         except OSError:
             font = ImageFont.load_default()
 
-        # Measure the widest line to anchor text to the right edge
         padding = 4
         line_spacing = 2
         w, h = img.size
 
-        # Compute line heights via getbbox for accurate placement
         sample_bbox = font.getbbox("Ag")  # (left, top, right, bottom)
         line_h = sample_bbox[3] - sample_bbox[1] + line_spacing
 
+        # ---- Bottom-right: metric lines --------------------------------
         total_h = line_h * len(lines) + padding
-        y = h - total_h  # start y for the first line
-
+        y = h - total_h
         for text, color in lines:
             bbox = font.getbbox(text)
             text_w = bbox[2] - bbox[0]
             x = w - text_w - padding
-            # Thin dark shadow for legibility on any background
             draw.text((x + 1, y + 1), text, font=font, fill=(0, 0, 0))
             draw.text((x, y), text, font=font, fill=color)
             y += line_h
+
+        # ---- Top-right: success/fail label (final frame only) ----------
+        if success is not None:
+            label = "SUCCESS!" if success else "FAIL"
+            color = (80, 220, 80) if success else (255, 80, 80)
+            bbox = font.getbbox(label)
+            text_w = bbox[2] - bbox[0]
+            x = w - text_w - padding
+            y = padding
+            draw.text((x + 1, y + 1), label, font=font, fill=(0, 0, 0))
+            draw.text((x, y), label, font=font, fill=color)
 
         return np.array(img)
 
