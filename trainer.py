@@ -91,8 +91,9 @@ class Trainer:
         self._warmup(obs) 
     
         # Set a goal for the first episode
-        self._goal = self.goal_ds.sample_goal()
+        self._goal, self._goal_idx  = self.goal_ds.sample_goal()
         self._goal_obs = self._goal.obs
+        
         self._goal.save_image_to_file(os.path.join(self.cfg.output_dir, "goal_image_0.png"))
 
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
@@ -169,6 +170,7 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
+                self.goal_ds._update_intrinsic_motivation(self._goal.index, self.env.check_custom_success(obs))
                 self.buffer.end_episode()
 
                 logger.info(

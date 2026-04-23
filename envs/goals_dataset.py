@@ -23,6 +23,8 @@ from omegaconf import DictConfig
 
 from envs.libero_env import LiberoEnv, PARK_QPOS, set_arm_qpos, get_object_pos
 
+from intrinsic_motivation.learning_progress import compute_lp
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +66,8 @@ class GoalsDataset:
         self.cfg = cfg
         self.env = env
         self._goals: List[GoalSample] = []
+        self._results_queues: List = []  # For tracking results for each goal
+        self._lps: List = []  # For tracking learning progress for each goal
 
         # Resolve object position key
         self._object_pos_key: str = (
@@ -115,7 +119,7 @@ class GoalsDataset:
 
     def sample_goal(self) -> GoalSample:
         """
-        Return a randomly selected goal from the dataset.
+        lp-proportional sampling: sample a goal with probability proportional to its learning progress.
 
         Raises:
             RuntimeError: if generate() has not been called yet.
@@ -124,8 +128,21 @@ class GoalsDataset:
             raise RuntimeError(
                 "GoalsDataset is empty. Call generate() before sample_goal()."
             )
-        idx = np.random.randint(0, len(self._goals))
-        return self._goals[idx]
+        N = len(self._goals)
+        lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
+
+        # ε-greedy proportional probability matching
+        eps = self.cfg.goals.epsilon
+        uniform = np.ones(N) / N
+        lp_sum = lp_values.sum()
+
+        if lp_sum == 0:
+            probs = uniform  # fallback: all LPs are 0 at the start
+        else:
+            probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+
+        idx = np.random.choice(N, p=probs)
+        return self._goals[idx], idx
 
     def __len__(self) -> int:
         return len(self._goals)
@@ -187,3 +204,9 @@ class GoalsDataset:
             x, y, position[0], position[1], position[2],
         )
         return GoalSample(obs=obs, image=image, position=position)
+
+    def _update_intrinsic_motivation(self, goal_idx: int, result: float):
+        results = self._results_queues[goal_idx]
+        results.append(result)
+        n_eval = len(results)
+        self._lps[goal_idx] = compute_lp(results, n_eval)
