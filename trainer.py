@@ -170,7 +170,7 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
-                self.goal_ds._update_intrinsic_motivation(self._goal.index, self.env.check_custom_success(obs))
+                self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
                 self.buffer.end_episode()
 
                 logger.info(
@@ -201,7 +201,7 @@ class Trainer:
                 # Reset for next episode
                 self.episode_num += 1
 
-                self._goal = self.goal_ds.sample_goal()
+                self._goal, self._goal_idx  = self.goal_ds.sample_goal()
                 # new goal for next episode 
                 self._goal_obs = self._goal.obs
                 z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
@@ -470,7 +470,8 @@ class Trainer:
         """
         Sample a goal obs from Goal dataset
         """
-        return self.goal_ds.sample_goal().obs
+        self._goal, self._goal_idx = self.goal_ds.sample_goal()
+        return self._goal.obs
 
     def _random_goal_obs(self, obs: dict) -> dict:
         """Use current obs as a placeholder goal during warmup."""

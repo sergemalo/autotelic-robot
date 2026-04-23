@@ -17,3 +17,5 @@ camera_key: agentview_image
 # Object position obs key — used to read ground-truth position after settling
 # Format: <object_name>_1_pos  (set automatically from env.object_name at runtime)
 object_pos_key: null          # if null, inferred as f"{env.object_name}_1_pos"
+
+epsilon: 0.2 # learning progress epsilon

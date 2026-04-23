@@ -101,7 +101,11 @@ class GoalsDataset:
         n = self.cfg.goals.n_goals
         logger.info("Generating %d goals...", n)
 
+        # Reset 
         self._goals = []
+        self._results_queues = []
+        self._lps = []
+
         rng = np.random.default_rng(self.cfg.seed)
 
         # Sample all positions upfront for reproducibility
@@ -111,7 +115,8 @@ class GoalsDataset:
         for i in tqdm(range(n), desc="Generating goals"):
             goal = self._capture_goal(xs[i], ys[i])
             self._goals.append(goal)
-
+            self._results_queues.append([])  # Initialize empty results queue for this goal
+            self._lps.append(0.0)  # Initialize LP to 0 for this goal
 
         # Restore env to a clean state after goal generation
         self.env.reset()
@@ -142,6 +147,7 @@ class GoalsDataset:
             probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
 
         idx = np.random.choice(N, p=probs)
+        
         return self._goals[idx], idx
 
     def __len__(self) -> int:
