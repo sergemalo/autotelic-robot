@@ -243,7 +243,7 @@ class Trainer:
                 # Restore training state: eval borrows the env and leaves
                 # it in an undefined state. Reset everything so the next
                 # training step starts from a clean episode.
-                self._goal = self.goal_ds.sample_goal()
+                self._goal, self._goal_idx = self.goal_ds.sample_goal()
                 self._goal_obs = self._goal.obs
                 obs = self.env.reset(goal_coordinates=self._goal.position)
                 z = self.encoder.encode(self._single_obs(obs))
