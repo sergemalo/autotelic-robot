@@ -286,7 +286,7 @@ class Trainer:
         successes, returns, distances = [], [], []
 
         for ep in range(self.cfg.eval.eval_episodes):
-            goal = self.goal_ds.sample_goal()
+            goal, _goal_idx = self.goal_ds.sample_goal()
             obs = self.env.reset(goal_coordinates=goal.position)
             goal_obs = goal.obs
             ep_return = 0.0
