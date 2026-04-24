@@ -14,3 +14,7 @@ joint_limits:
   j5: [-1.57,  1.57]   # wrist rotation
   j6: [ 0.01,  1.57]   # wrist flex
   j7: [ 0.01,  1.57]   # wrist roll
+
+
+epsilon: 0.1   # ε-greedy weight for uniform exploration in goal sampling
+
