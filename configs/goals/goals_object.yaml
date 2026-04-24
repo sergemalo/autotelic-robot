@@ -1,0 +1,11 @@
+# @package _global_.goals
+n_goals: 5
+n_settle: 50
+camera_key: agentview_image
+object_pos_key: null          # if null, inferred as f"{env.object_name}_1_pos"
+
+# Workspace limits for random object placement (world frame, metres)
+x_min: -0.25
+x_max:  0.25
+y_min: -0.25
+y_max:  0.25

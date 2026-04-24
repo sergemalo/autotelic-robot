@@ -18,8 +18,8 @@ from agents import make_agent
 from agents.sac import SACAgent
 from encoders import make_encoder
 from encoders.base import BaseEncoder
-from envs.libero_env import LiberoEnv, get_object_pos
-from envs.goals_dataset import GoalSample, GoalsDataset
+from envs.libero_env import LiberoObjectEnv, LiberoArmEnv, get_object_pos
+from envs.goals_dataset import GoalSample, ObjectGoalsDataset, ArmGoalsDataset
 from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
@@ -27,6 +27,16 @@ from utils.logging_utils import WandBLogger
 from utils.seed_ctrl import set_global_seed
 
 logger = logging.getLogger(__name__)
+
+
+_ENV_CLASSES = {
+    "libero_object": LiberoObjectEnv,
+    "libero_arm": LiberoArmEnv,
+}
+_GOALS_CLASSES = {
+    "libero_object": ObjectGoalsDataset,
+    "libero_arm":    ArmGoalsDataset,
+}
 
 
 class Trainer:
@@ -50,7 +60,10 @@ class Trainer:
         set_global_seed(cfg.seed)
 
         # ---- Components ---------------------------------------------
-        self.env = LiberoEnv(cfg)
+        #self.env = LiberoEnv(cfg)
+        self.env = _ENV_CLASSES[cfg.env.name](cfg)
+        #self.env = hydra.utils.instantiate(cfg.env, cfg=cfg)
+
         self.encoder: BaseEncoder = make_encoder(cfg, self.device)
         self.reward_fn: BaseReward = make_reward(cfg)
         self.buffer = ReplayBuffer(
@@ -67,7 +80,9 @@ class Trainer:
 
         # ---- Goal management -----------------------------------------
         # Geneate Goal Dataset
-        self.goal_ds = GoalsDataset(cfg, self.env)
+        #self.goal_ds = GoalsDataset(cfg, self.env)
+        self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
+
         self.goal_ds.generate()
 
         # Current goal obs — sampled from buffer or set at episode start
@@ -93,7 +108,6 @@ class Trainer:
         # Set a goal for the first episode
         self._goal = self.goal_ds.sample_goal()
         self._goal_obs = self._goal.obs
-        self._goal.save_image_to_file(os.path.join(self.cfg.output_dir, "goal_image_0.png"))
 
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
 
@@ -116,6 +130,9 @@ class Trainer:
 
             # ---- Step environment ------------------------------------
             next_obs, _libero_reward, done, info = self.env.step(action)
+            success = info['success_info'].success
+            pos_err = info['success_info'].pos_err
+            ori_err = info['success_info'].ori_err
 
             # ---- Encode next obs -------------------------------------
             z_next = self.encoder.encode(self._single_obs(next_obs))
@@ -172,19 +189,23 @@ class Trainer:
                 self.buffer.end_episode()
 
                 logger.info(
-                    "Episode %d | steps=%d | return=%.3f | success=%s",
+                    "Episode %d | steps=%d | return=%.3f | success=%s | pos_err=%.3fm | ori_err=%.3frad",
                     self.episode_num,
                     episode_steps,
                     episode_return,
-                    self.env.check_custom_success(obs),
+                    success,
+                    pos_err,
+                    ori_err
                 )
 
                 self.wandb.log_scalar(
                     {
                         "episode_return": episode_return,
                         "episode_length": episode_steps,
-                        "success": float(self.env.check_custom_success(obs)),
+                        "success": (float(success)),
                         "latent_distance": torch.linalg.vector_norm(z_next - z_goal).item(),
+                        "last_pos_error": pos_err,
+                        "last_ori_error": ori_err
                     },
                     step=self.total_steps,
                 )
@@ -284,7 +305,10 @@ class Trainer:
                 z = self.encoder.encode(self._single_obs(obs))
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
                 action = self.agent.select_action(z, z_goal, deterministic=True)
-                next_obs, _, done, _ = self.env.step(action)
+                next_obs, _, done, info = self.env.step(action)
+                success = info['success_info'].success
+                pos_err = info['success_info'].pos_err
+                ori_err = info['success_info'].ori_err
 
                 r = self.reward_fn.compute(
                     obs=obs,
@@ -299,11 +323,16 @@ class Trainer:
 
                 # Capture frame after reward is known so overlay values are current
                 raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
+                if self.cfg.env.name == "libero_object":
+                    obj_pos = obs[self.cfg.reward.object_pos_key]
+                else:                    
+                    obj_pos = None 
                 frames.append(self._annotate_frame(
                     raw_frame, r,
                     eef_pos=obs["robot0_eef_pos"],
-                    obj_pos=obs[self.cfg.reward.object_pos_key],
+                    obj_pos=obj_pos,
                     goal_pos=goal.position,
+                    info_success=info['success_info'],
                 ))
 
                 obs = next_obs
@@ -313,14 +342,17 @@ class Trainer:
 
 
             # Capture the final frame (terminal state — reward shown as 0.0)
-            success = self.env.check_custom_success(obs)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
+            if self.cfg.env.name == "libero_object":
+                obj_pos = obs[self.cfg.reward.object_pos_key]
+            else:                    
+                obj_pos = None 
             last_frame = self._annotate_frame(
                 raw_frame, 0.0,
                 eef_pos=obs["robot0_eef_pos"],
-                obj_pos=obs[self.cfg.reward.object_pos_key],
+                obj_pos=obj_pos,
                 goal_pos=goal.position,
-                success=success,
+                info_success=info['success_info'],
             )
             for _ in range(10):  # Show final frame for a few frames at the end of the video
                 frames.append(last_frame)
@@ -339,9 +371,9 @@ class Trainer:
             distances.append(dist)
 
             logger.info(
-                "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s",
+                "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s | pos_err=%.3fm | ori_err=%.3frad",
                 ep + 1, self.cfg.eval.eval_episodes,
-                ep_step, ep_return, dist, success,
+                ep_step, ep_return, dist, success, pos_err, ori_err,
             )
 
             # ---- Log to WandB ---------------------------------------
@@ -396,7 +428,7 @@ class Trainer:
         obj_pos: np.ndarray,
         goal_pos: np.ndarray,
         font_size: int = 12,
-        success: Optional[bool] = None,
+        info_success = None,
     ) -> np.ndarray:
         """
         Overlay diagnostic text on a (H, W, 3) uint8 frame.
@@ -421,14 +453,23 @@ class Trainer:
         Returns:
             Annotated uint8 numpy array (H, W, 3).
         """
-        eef_obj_dist  = float(np.linalg.norm(eef_pos - obj_pos))
-        obj_goal_dist = float(np.linalg.norm(obj_pos - goal_pos))
+        if obj_pos is None:
+            eef_goal_dist  = float(np.linalg.norm(eef_pos - goal_pos))
+            lines = [
+                (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
+                (f"Pos err: {info_success.pos_err:.2f}m", (255,  80,  80)),  # red
+                (f"Ori err: {info_success.ori_err:.2f}rad", (255,  80,  80)),  # red
+                
+            ]
+        else:
+            eef_obj_dist  = float(np.linalg.norm(eef_pos - obj_pos))
+            obj_goal_dist = float(np.linalg.norm(obj_pos - goal_pos))
 
-        lines = [
-            (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
-            (f"EEF-OBJ:  {eef_obj_dist:.2f}m", ( 80, 220,  80)),  # green
-            (f"OBJ-GOAL: {obj_goal_dist:.2f}m", (255,  80,  80)),  # red
-        ]
+            lines = [
+                (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
+                (f"EEF-OBJ:  {eef_obj_dist:.2f}m", ( 80, 220,  80)),  # green
+                (f"OBJ-GOAL: {obj_goal_dist:.2f}m", (255,  80,  80)),  # red
+            ]
 
         img = Image.fromarray(frame)
         draw = ImageDraw.Draw(img)
@@ -457,16 +498,15 @@ class Trainer:
             draw.text((x, y), text, font=font, fill=color)
             y += line_h
 
-        # ---- Top-right: success/fail label (final frame only) ----------
-        if success is not None:
-            label = "SUCCESS!" if success else "FAIL"
-            color = (80, 220, 80) if success else (255, 80, 80)
-            bbox = font.getbbox(label)
-            text_w = bbox[2] - bbox[0]
-            x = w - text_w - padding
-            y = padding
-            draw.text((x + 1, y + 1), label, font=font, fill=(0, 0, 0))
-            draw.text((x, y), label, font=font, fill=color)
+        # ---- Top-right: success/fail label ----------
+        label = "SUCCESS!" if info_success.success else "FAIL"
+        color = (80, 220, 80) if info_success.success else (255, 80, 80)
+        bbox = font.getbbox(label)
+        text_w = bbox[2] - bbox[0]
+        x = w - text_w - padding
+        y = padding
+        draw.text((x + 1, y + 1), label, font=font, fill=(0, 0, 0))
+        draw.text((x, y), label, font=font, fill=color)
 
         return np.array(img)
 
