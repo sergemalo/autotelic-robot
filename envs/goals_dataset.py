@@ -69,8 +69,11 @@ class GoalSample:
     position: np.ndarray                  # float32 (3,)
     quat: Optional[np.ndarray] = None     # float32 (4,) or None
 
-    def save_image_to_file(self, image_path: str) -> None:
-        Image.fromarray(self.image[::-1]).save(image_path)
+    def save_image_to_file(self, image_path: str, reverse = False) -> None:
+        if reverse:
+            Image.fromarray(self.image[::-1]).save(image_path)
+        else:
+            Image.fromarray(self.image).save(image_path)
 
 
 # ---------------------------------------------------------------------------

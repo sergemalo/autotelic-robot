@@ -20,6 +20,7 @@ from encoders import make_encoder
 from encoders.base import BaseEncoder
 from envs.libero_env import LiberoObjectEnv, LiberoArmEnv, get_object_pos
 from envs.goals_dataset import GoalSample, ObjectGoalsDataset, ArmGoalsDataset
+from envs.static_arm_goals_dataset import StaticArmGoalsDataset
 from replay_buffer import ReplayBuffer
 from rewards.factory import make_reward
 from rewards.base import BaseReward
@@ -81,9 +82,10 @@ class Trainer:
         # ---- Goal management -----------------------------------------
         # Geneate Goal Dataset
         #self.goal_ds = GoalsDataset(cfg, self.env)
-        self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
-
-        self.goal_ds.generate()
+        #self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
+        #self.goal_ds.generate()
+        self.goal_ds = StaticArmGoalsDataset(cfg)
+        self.goal_ds.load()
 
         # Current goal obs — sampled from buffer or set at episode start
         self._goal_obs: Optional[dict] = None
@@ -106,15 +108,17 @@ class Trainer:
         self._warmup(obs) 
     
         # Set a goal for the first episode
-        self._goal = self.goal_ds.sample_goal()
+        #self._goal = self.goal_ds.sample_goal()
+        self._goal = self.goal_ds.sample_goal(split="train")        
         self._goal_obs = self._goal.obs
 
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
 
-        obs = self.env.reset(goal_coordinates = self._goal.position)
+        obs = self.env.reset(goal_coordinates = self._goal.position, goal_quat=self._goal.quat)
 
-        z = self.encoder.encode(self._single_obs(obs))
-        z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
+        #z = self.encoder.encode(self._single_obs(obs))
+        z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
+        z_goal = self.encoder.encode(self._goal.image)
         episode_return = 0.0
         episode_steps = 0
 
@@ -135,7 +139,7 @@ class Trainer:
             ori_err = info['success_info'].ori_err
 
             # ---- Encode next obs -------------------------------------
-            z_next = self.encoder.encode(self._single_obs(next_obs))
+            z_next = self.encoder.encode(self._single_obs(next_obs)[self.cfg.encoder.camera_key])
 
             # ---- Compute reward --------------------------------------
             reward = self.reward_fn.compute(
@@ -220,15 +224,15 @@ class Trainer:
                 # Reset for next episode
                 self.episode_num += 1
 
-                self._goal = self.goal_ds.sample_goal()
+                self._goal = self.goal_ds.sample_goal(split="train")
                 # new goal for next episode 
                 self._goal_obs = self._goal.obs
-                z_goal = self.encoder.encode(self._single_obs(self._goal_obs))
+                z_goal = self.encoder.encode(self._goal.image)
                 
                 # reset starting obs
 
-                obs = self.env.reset(goal_coordinates = self._goal.position)
-                z = self.encoder.encode(self._single_obs(obs))
+                obs = self.env.reset(goal_coordinates = self._goal.position, goal_quat=self._goal.quat)
+                z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
 
                 # reset episode return and steps
                 episode_return = 0.0
@@ -242,10 +246,10 @@ class Trainer:
                 # Restore training state: eval borrows the env and leaves
                 # it in an undefined state. Reset everything so the next
                 # training step starts from a clean episode.
-                self._goal = self.goal_ds.sample_goal()
+                self._goal = self.goal_ds.sample_goal(split="train")
                 self._goal_obs = self._goal.obs
-                obs = self.env.reset(goal_coordinates=self._goal.position)
-                z = self.encoder.encode(self._single_obs(obs))
+                obs = self.env.reset(goal_coordinates=self._goal.position, goal_quat=self._goal.quat)
+                z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
                 episode_return = 0.0
                 episode_steps = 0
 
@@ -285,8 +289,9 @@ class Trainer:
         successes, returns, distances = [], [], []
 
         for ep in range(self.cfg.eval.eval_episodes):
-            goal = self.goal_ds.sample_goal()
-            obs = self.env.reset(goal_coordinates=goal.position)
+            goal = self.goal_ds.sample_goal(split="eval")
+            z_goal = self.encoder.encode(goal.image)
+            obs = self.env.reset(goal_coordinates=goal.position, goal_quat=goal.quat)
             goal_obs = goal.obs
             ep_return = 0.0
             done = False
@@ -302,8 +307,7 @@ class Trainer:
             while not done and ep_step < max_steps:
                 # Capture frame before stepping (shows state at this step)
 
-                z = self.encoder.encode(self._single_obs(obs))
-                z_goal = self.encoder.encode(self._single_obs(goal_obs))
+                z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
                 action = self.agent.select_action(z, z_goal, deterministic=True)
                 next_obs, _, done, info = self.env.step(action)
                 success = info['success_info'].success
@@ -315,7 +319,7 @@ class Trainer:
                     next_obs=next_obs,
                     goal_obs=goal_obs,
                     z=z,
-                    z_next=self.encoder.encode(self._single_obs(next_obs)),
+                    z_next=self.encoder.encode(self._single_obs(next_obs)[self.cfg.encoder.camera_key]),
                     z_goal=z_goal,
                 )
                 ep_return += r
@@ -362,8 +366,8 @@ class Trainer:
             self._save_video(frames, video_path)
 
             # ---- Metrics --------------------------------------------
-            z_final = self.encoder.encode(self._single_obs(obs))
-            z_goal_t = self.encoder.encode(self._single_obs(goal_obs))
+            z_final = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
+            z_goal_t = z_goal.squeeze(0)  # (latent_dim,) — remove batch dim for distance computation
             dist = float(torch.linalg.vector_norm(z_final - z_goal_t).item())
 
             successes.append(float(success))
@@ -575,8 +579,8 @@ class Trainer:
             next_obs, _, done, _ = self.env.step(action)
 
             # Dummy zero reward during warmup — buffer is just being seeded
-            z = self.encoder.encode(self._single_obs(obs))
-            z_next = self.encoder.encode(self._single_obs(next_obs))
+            z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
+            z_next = self.encoder.encode(self._single_obs(next_obs)[self.cfg.encoder.camera_key])
             
             self.buffer.push(
                 obs=obs,
@@ -609,7 +613,7 @@ class Trainer:
         """
         Sample a goal obs from Goal dataset
         """
-        return self.goal_ds.sample_goal().obs
+        return self.goal_ds.sample_goal(split="train").obs
 
     def _random_goal_obs(self, obs: dict) -> dict:
         """Use current obs as a placeholder goal during warmup."""

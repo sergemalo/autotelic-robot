@@ -1,0 +1,11 @@
+# @package _global_.goals
+# Config for StaticArmGoalsDataset — loads goals from a pre-generated .npz file.
+
+camera_key: agentview_image   # informational only; images are pre-extracted in the .npz
+
+# Path to the .npz file produced by gen_arm_dataset.py
+dataset_path: arm_dataset.npz             # must be set on the command line or in a child config
+
+# Fraction of the dataset used for training. The remainder goes to eval.
+# e.g. 0.9 → 90% train, 10% eval
+train_split: 0.9
