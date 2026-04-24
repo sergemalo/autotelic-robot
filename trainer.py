@@ -130,6 +130,9 @@ class Trainer:
 
             # ---- Step environment ------------------------------------
             next_obs, _libero_reward, done, info = self.env.step(action)
+            success = info['success_info'].success
+            pos_err = info['success_info'].pos_err
+            ori_err = info['success_info'].ori_err
 
             # ---- Encode next obs -------------------------------------
             z_next = self.encoder.encode(self._single_obs(next_obs))
@@ -186,19 +189,23 @@ class Trainer:
                 self.buffer.end_episode()
 
                 logger.info(
-                    "Episode %d | steps=%d | return=%.3f | success=%s",
+                    "Episode %d | steps=%d | return=%.3f | success=%s | pos_err=%.3fm | ori_err=%.3frad",
                     self.episode_num,
                     episode_steps,
                     episode_return,
-                    self.env.check_custom_success(obs).success,
+                    success,
+                    pos_err,
+                    ori_err
                 )
 
                 self.wandb.log_scalar(
                     {
                         "episode_return": episode_return,
                         "episode_length": episode_steps,
-                        "success": float(self.env.check_custom_success(obs).success),
+                        "success": (float(success)),
                         "latent_distance": torch.linalg.vector_norm(z_next - z_goal).item(),
+                        "last_pos_error": pos_err,
+                        "last_ori_error": ori_err
                     },
                     step=self.total_steps,
                 )
@@ -299,7 +306,9 @@ class Trainer:
                 z_goal = self.encoder.encode(self._single_obs(goal_obs))
                 action = self.agent.select_action(z, z_goal, deterministic=True)
                 next_obs, _, done, info = self.env.step(action)
-                success_info = info['success_info'] if 'success_info' in info else None
+                success = info['success_info'].success
+                pos_err = info['success_info'].pos_err
+                ori_err = info['success_info'].ori_err
 
                 r = self.reward_fn.compute(
                     obs=obs,
@@ -323,7 +332,7 @@ class Trainer:
                     eef_pos=obs["robot0_eef_pos"],
                     obj_pos=obj_pos,
                     goal_pos=goal.position,
-                    info=success_info,
+                    info_success=info['success_info'],
                 ))
 
                 obs = next_obs
@@ -333,7 +342,6 @@ class Trainer:
 
 
             # Capture the final frame (terminal state — reward shown as 0.0)
-            info = self.env.check_custom_success(obs)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
             if self.cfg.env.name == "libero_object":
                 obj_pos = obs[self.cfg.reward.object_pos_key]
@@ -344,7 +352,7 @@ class Trainer:
                 eef_pos=obs["robot0_eef_pos"],
                 obj_pos=obj_pos,
                 goal_pos=goal.position,
-                info=info,
+                info_success=info['success_info'],
             )
             for _ in range(10):  # Show final frame for a few frames at the end of the video
                 frames.append(last_frame)
@@ -358,14 +366,14 @@ class Trainer:
             z_goal_t = self.encoder.encode(self._single_obs(goal_obs))
             dist = float(torch.linalg.vector_norm(z_final - z_goal_t).item())
 
-            successes.append(float(info.success))
+            successes.append(float(success))
             returns.append(ep_return)
             distances.append(dist)
 
             logger.info(
-                "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s",
+                "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s | pos_err=%.3fm | ori_err=%.3frad",
                 ep + 1, self.cfg.eval.eval_episodes,
-                ep_step, ep_return, dist, info.success,
+                ep_step, ep_return, dist, success, pos_err, ori_err,
             )
 
             # ---- Log to WandB ---------------------------------------
@@ -420,7 +428,7 @@ class Trainer:
         obj_pos: np.ndarray,
         goal_pos: np.ndarray,
         font_size: int = 12,
-        info = None,
+        info_success = None,
     ) -> np.ndarray:
         """
         Overlay diagnostic text on a (H, W, 3) uint8 frame.
@@ -449,8 +457,8 @@ class Trainer:
             eef_goal_dist  = float(np.linalg.norm(eef_pos - goal_pos))
             lines = [
                 (f"Reward:   {reward:+.2f}",       (100, 160, 255)),  # blue
-                (f"Pos err: {info.pos_err:.2f}m", (255,  80,  80)),  # red
-                (f"Ori err: {info.ori_err:.2f}rad", (255,  80,  80)),  # red
+                (f"Pos err: {info_success.pos_err:.2f}m", (255,  80,  80)),  # red
+                (f"Ori err: {info_success.ori_err:.2f}rad", (255,  80,  80)),  # red
                 
             ]
         else:
@@ -491,8 +499,8 @@ class Trainer:
             y += line_h
 
         # ---- Top-right: success/fail label ----------
-        label = "SUCCESS!" if info.success else "FAIL"
-        color = (80, 220, 80) if info.success else (255, 80, 80)
+        label = "SUCCESS!" if info_success.success else "FAIL"
+        color = (80, 220, 80) if info_success.success else (255, 80, 80)
         bbox = font.getbbox(label)
         text_w = bbox[2] - bbox[0]
         x = w - text_w - padding
