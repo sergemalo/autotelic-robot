@@ -9,3 +9,6 @@ dataset_path: arm_dataset.npz             # must be set on the command line or i
 # Fraction of the dataset used for training. The remainder goes to eval.
 # e.g. 0.9 → 90% train, 10% eval
 train_split: 0.9
+
+epsilon: 0.1   # ε-greedy weight for uniform exploration in goal sampling
+

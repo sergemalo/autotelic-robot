@@ -44,6 +44,8 @@ from .goals_dataset import GoalSample
 
 logger = logging.getLogger(__name__)
 
+from intrinsic_motivation.learning_progress import compute_lp
+
 
 class StaticArmGoalsDataset:
     """
@@ -65,6 +67,8 @@ class StaticArmGoalsDataset:
         self.n_total = 0
         self.n_train = 0
         self.n_eval  = 0
+        self._results_queues: List = []  # For tracking results for each goal
+        self._lps: List = []  # For tracking learning progress for each goal
 
     # ------------------------------------------------------------------
     # Loading
@@ -162,8 +166,32 @@ class StaticArmGoalsDataset:
                 "Make sure load() was called and the dataset file is non-empty."
             )
 
-        idx = np.random.randint(0, len(goals))
-        return goals[idx]
+        if split == "eval":
+            idx = np.random.randint(0, len(goals))
+
+        else:  # train split: ε-greedy over LP
+            N = len(goals)
+            lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
+
+            # ε-greedy proportional probability matching
+            eps = self.cfg.goals.epsilon
+            uniform = np.ones(N) / N
+            lp_sum = lp_values.sum()
+
+            if lp_sum == 0:
+                probs = uniform  # fallback: all LPs are 0 at the start
+            else:
+                probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+
+            idx = np.random.choice(N, p=probs)
+
+        return goals[idx], idx
+
+    def _update_intrinsic_motivation(self, goal_idx: int, result: float):
+        results = self._results_queues[goal_idx]
+        results.append(result)
+        n_eval = len(results)
+        self._lps[goal_idx] = compute_lp(results, n_eval)
 
     # ------------------------------------------------------------------
     # Convenience accessors
