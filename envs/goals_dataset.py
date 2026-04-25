@@ -42,6 +42,8 @@ from envs.libero_env import (
     get_object_pos,
 )
 
+from intrinsic_motivation.learning_progress import compute_lp
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,22 +91,53 @@ class GoalsDataset:
         self.cfg = cfg
         self.env = env
         self._goals: List[GoalSample] = []
+        self._results_queues: List = []  # For tracking results for each goal
+        self._lps: List = []  # For tracking learning progress for each goal
+
+    
         self._camera_key: str = cfg.goals.camera_key
 
     def generate(self) -> None:
         raise NotImplementedError
 
+       
     def _capture_goal(self, *args, **kwargs) -> GoalSample:
         raise NotImplementedError
 
     def sample_goal(self) -> GoalSample:
+        """
+        lp-proportional sampling: sample a goal with probability proportional to its learning progress.
+
+        Raises:
+            RuntimeError: if generate() has not been called yet.
+        """
         if not self._goals:
             raise RuntimeError(
                 "GoalsDataset is empty. Call generate() before sample_goal()."
             )
-        idx = np.random.randint(0, len(self._goals))
-        return self._goals[idx]
+        N = len(self._goals)
+        lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
 
+        # ε-greedy proportional probability matching
+        eps = self.cfg.goals.epsilon
+        uniform = np.ones(N) / N
+        lp_sum = lp_values.sum()
+
+        if lp_sum == 0:
+            probs = uniform  # fallback: all LPs are 0 at the start
+        else:
+            probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+
+        idx = np.random.choice(N, p=probs)
+        
+        return self._goals[idx], idx
+
+    def _update_intrinsic_motivation(self, goal_idx: int, result: float):
+        results = self._results_queues[goal_idx]
+        results.append(result)
+        n_eval = len(results)
+        self._lps[goal_idx] = compute_lp(results, n_eval)
+        
     def __len__(self) -> int:
         return len(self._goals)
 
@@ -152,6 +185,9 @@ class ObjectGoalsDataset(GoalsDataset):
         logger.info("Generating %d object goals...", n)
 
         self._goals = []
+        self._results_queues = []
+        self._lps = []
+
         rng = np.random.default_rng(self.cfg.seed)
 
         xs = rng.uniform(self.cfg.goals.x_min, self.cfg.goals.x_max, size=n)
@@ -160,6 +196,8 @@ class ObjectGoalsDataset(GoalsDataset):
         for i in tqdm(range(n), desc="Generating object goals"):
             goal = self._capture_goal(xs[i], ys[i])
             self._goals.append(goal)
+            self._results_queues.append([])  # Initialize empty results queue for this goal
+            self._lps.append(0.0)  # Initialize LP to 0 for this goal
 
         self.env.reset()
         logger.info("Object goal generation complete. Dataset size: %d", len(self._goals))
@@ -195,6 +233,7 @@ class ObjectGoalsDataset(GoalsDataset):
         )
         return GoalSample(obs=obs, image=image, position=position)
 
+    
 
 # ---------------------------------------------------------------------------
 # Arm goal dataset
@@ -259,6 +298,9 @@ class ArmGoalsDataset(GoalsDataset):
         logger.info("Generating %d arm goals...", n)
 
         self._goals = []
+        self._results_queues = []
+        self._lps = []
+
         rng = np.random.default_rng(self.cfg.seed)
 
         # Sample all joint configurations upfront for reproducibility
@@ -270,6 +312,8 @@ class ArmGoalsDataset(GoalsDataset):
         for i in tqdm(range(n), desc="Generating arm goals"):
             goal = self._capture_goal(joint_configs[i])
             self._goals.append(goal)
+            self._results_queues.append([])  # Initialize empty results queue for this goal
+            self._lps.append(0.0)  # Initialize LP to 0 for this goal
             # Temp - write each goal image to file for debugging
             goal.save_image_to_file(os.path.join(self.cfg.output_dir, f"arm_goal_{i}.png"))
 

@@ -67,7 +67,6 @@ jsonschema-specifications==2025.9.1
 
 kiwisolver==1.4.9
 lark==1.3.1
--e git+https://github.com/montrealrobotics/LIBERO@b0e3d141a92a7859ebe36c46a743d96d23aa9504#egg=libero
 llvmlite==0.46.0
 Markdown==3.10.2
 markdown-it-py==4.0.0
