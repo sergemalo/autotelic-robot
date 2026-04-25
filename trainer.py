@@ -109,7 +109,7 @@ class Trainer:
     
         # Set a goal for the first episode
         #self._goal = self.goal_ds.sample_goal()
-        self._goal = self.goal_ds.sample_goal(split="train")        
+        self._goal, self._goal_idx  = self.goal_ds.sample_goal(split="train")        
         self._goal_obs = self._goal.obs
 
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
@@ -190,6 +190,7 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
+                self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
                 self.buffer.end_episode()
 
                 logger.info(
@@ -224,7 +225,7 @@ class Trainer:
                 # Reset for next episode
                 self.episode_num += 1
 
-                self._goal = self.goal_ds.sample_goal(split="train")
+                self._goal, self._goal_idx  = self.goal_ds.sample_goal(split="train")
                 # new goal for next episode 
                 self._goal_obs = self._goal.obs
                 z_goal = self.encoder.encode(self._goal.image)
@@ -246,7 +247,7 @@ class Trainer:
                 # Restore training state: eval borrows the env and leaves
                 # it in an undefined state. Reset everything so the next
                 # training step starts from a clean episode.
-                self._goal = self.goal_ds.sample_goal(split="train")
+                self._goal, self._goal_idx = self.goal_ds.sample_goal(split="train")
                 self._goal_obs = self._goal.obs
                 obs = self.env.reset(goal_coordinates=self._goal.position, goal_quat=self._goal.quat)
                 z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
@@ -289,7 +290,7 @@ class Trainer:
         successes, returns, distances = [], [], []
 
         for ep in range(self.cfg.eval.eval_episodes):
-            goal = self.goal_ds.sample_goal(split="eval")
+            goal, _ = self.goal_ds.sample_goal(split="eval")
             z_goal = self.encoder.encode(goal.image)
             obs = self.env.reset(goal_coordinates=goal.position, goal_quat=goal.quat)
             goal_obs = goal.obs
@@ -613,7 +614,8 @@ class Trainer:
         """
         Sample a goal obs from Goal dataset
         """
-        return self.goal_ds.sample_goal(split="train").obs
+        self._goal, self._goal_idx = self.goal_ds.sample_goal(split="train")
+        return self._goal.obs
 
     def _random_goal_obs(self, obs: dict) -> dict:
         """Use current obs as a placeholder goal during warmup."""
