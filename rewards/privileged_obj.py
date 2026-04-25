@@ -16,7 +16,7 @@ from rewards.base import BaseReward
 logger = logging.getLogger(__name__)
 
 
-class PrivilegedReward(BaseReward):
+class PrivilegedRewardObj(BaseReward):
     """
     r = -||pos_next - pos_goal||₂  (negative Euclidean distance)
 
@@ -34,7 +34,7 @@ class PrivilegedReward(BaseReward):
         if object_pos_key is None:
             raise ValueError(
                 "reward.object_pos_key must be set in config when using "
-                "the privileged reward. "
+                "the privileged reward object. "
                 "Example: reward.object_pos_key=akita_black_bowl_1_pos"
             )
         self.object_pos_key = object_pos_key
@@ -44,7 +44,7 @@ class PrivilegedReward(BaseReward):
         self.sparse_threshold = sparse_threshold
 
         logger.info(
-            "PrivilegedReward: key=%s, type=%s, scale=%.2f, offset=%.2f",
+            "PrivilegedRewardObj: key=%s, type=%s, scale=%.2f, offset=%.2f",
             object_pos_key, reward_type, reward_scale, reward_offset,
         )
 

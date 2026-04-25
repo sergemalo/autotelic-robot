@@ -1,0 +1,19 @@
+# @package _global_.reward
+name: privileged_arm
+# Key in the obs dict that gives the current EEF position (3D xyz)
+eef_pos_key: "robot0_eef_pos"
+# Key in the obs dict that gives the current EEF quaternion (xyzw or wxyz — must match your env)
+eef_ori_key: "robot0_eef_quat"
+# Keys in the GOAL obs dict for target EEF pos and ori
+goal_eef_pos_key: "robot0_eef_pos"
+goal_eef_ori_key: "robot0_eef_quat"
+
+reward_scale: 1.0
+reward_type: continuous  # continuous | sparse
+sparse_threshold: 0.05   # only used when reward_type: sparse
+
+# Offset added to each term so the reward is always >= 0.
+# pos_offset should be >= max possible pos distance (e.g. table diagonal ~0.8m)
+# ori_offset should be >= max possible ori distance = 1.0 (geodesic is in [0, 1])
+pos_offset: 1.0
+ori_offset: 1.0
