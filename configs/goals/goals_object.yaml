@@ -9,3 +9,5 @@ x_min: -0.25
 x_max:  0.25
 y_min: -0.25
 y_max:  0.25
+
+epsilon: 0.1   # ε-greedy weight for uniform exploration in goal sampling

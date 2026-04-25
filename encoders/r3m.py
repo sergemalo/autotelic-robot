@@ -58,16 +58,16 @@ class R3MEncoder(BaseEncoder):
         return self._latent_dim
 
     @torch.no_grad()
-    def encode(self, obs: Dict[str, np.ndarray]) -> torch.Tensor:
+    def encode(self, img: np.ndarray) -> torch.Tensor:
         """
         Args:
-            obs: dict containing self.camera_key → uint8 numpy image
+            img: uint8 numpy image
 
         Returns:
             z: Tensor (B, latent_dim)
         """
-        img = self.obs_to_image_tensor(obs)  # (B, 3, H, W) in [0, 1]
+        img_t = self.obs_to_image_tensor(img)  # (B, 3, H, W) in [0, 1]
         # R3M expects [0, 255] range — rescale back
-        img = img * 255.0
-        z = self.model(img)                  # (B, latent_dim)
+        img_t = img_t * 255.0
+        z = self.model(img_t)                  # (B, latent_dim)
         return z

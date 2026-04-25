@@ -165,7 +165,7 @@ class ReplayBuffer:
             self._z_goal_original[idx] = z_goal.squeeze(0)
             if goal_obs is not None:
                 for key in self._goal_obs_original:
-                    self._goal_obs_original[key][idx] = goal_obs[key]
+                    self._goal_obs_original[key][idx] = goal_obs[key] if key in goal_obs else np.zeros_like(self._goal_obs_original[key][idx])
 
         if self._size == 1:
             self._log_sample_size()
