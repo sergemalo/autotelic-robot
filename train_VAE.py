@@ -1,5 +1,5 @@
 import logging
-
+import dill
 import hydra
 from omegaconf import DictConfig
 
@@ -40,13 +40,9 @@ def main(cfg: DictConfig):
     logger.info("Starting VAE training.")
     logger.debug("Full config:\n%s", cfg)
 
-
-
     # Load images from goals_data directory
     image_dir = os.path.abspath("goals_data")
-    imsize = 84  # Target size for VAE
-    channels = 3
-    all_images = load_and_preprocess_images(image_dir, imsize=imsize)
+    all_images = load_and_preprocess_images(image_dir, imsize=cfg.imsize)
 
     # Split into train and test sets (e.g., 80% train, 20% test)
     train_data, test_data = train_test_split(all_images, test_size=0.2, random_state=42)
@@ -60,9 +56,9 @@ def main(cfg: DictConfig):
 
     model = ConvVAE(
         representation_size=cfg.representation_size,
-        input_channels=channels,
-        architecture=imsize84_default_architecture,
-        imsize=imsize,
+        input_channels=cfg.channels,
+        architecture=imsize48_default_architecture,
+        imsize=cfg.imsize,
         decoder_output_activation=decoder_activation
     )
 
@@ -93,14 +89,14 @@ def main(cfg: DictConfig):
       # wandb.log({"epoch": epoch, "train/loss": train_loss, "test/loss": test_loss})
       wandb.log_scalar(
                   {
-                    "train_loss": train_loss,
-                    "test_loss": test_loss
+                    "VAE_train_loss": train_loss,
+                    "VAE_test_loss": test_loss
                   }, step=epoch
               )
       #index += 1
-      if epoch % 3 == 0:
+      if epoch % 2 == 0:
           os.makedirs('vae_models', exist_ok=True)
-          torch.save(model.state_dict(), f'vae_models/model_epoch_{epoch}.pth')
+          torch.save(model, f'vae_models/model_epoch_{epoch}.pth', pickle_module=dill)
 
 
 if __name__ == "__main__":

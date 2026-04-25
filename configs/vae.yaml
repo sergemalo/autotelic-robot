@@ -1,18 +1,14 @@
 defaults:
-  - encoder: r3m
-  - reward: privileged
-  - agent: sac
-  - replay_buffer: default
-  - env: libero
   - wandb: default
-  - goals: default
-  - _self_
 
 representation_size: 4
 beta: 0.08
-num_epochs: 3 # 501
+num_epochs: 10 # 501
 decoder_activation: sigmoid
 batch_size: 128
 lr: 1e-3
 
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+
+imsize: 48  # Target size for VAE
+channels: 3
