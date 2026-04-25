@@ -1,0 +1,10 @@
+# @package _global_.env
+# Object reaching/pushing task — robot moves an object to a target position.
+name: libero_object
+object_name: milk             # MuJoCo asset name (must exist in LIBERO assets)
+camera_heights: 224
+camera_widths: 224
+camera_name: agentview
+action_dim: 7                 # 6 DoF EEF delta + 1 gripper
+episode_length: 300
+success_threshold: 0.1        # metres
