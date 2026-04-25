@@ -1,11 +1,11 @@
 defaults:
   - encoder: r3m
-  - reward: latent
+  - reward: privileged_arm
   - agent: sac
   - replay_buffer: default
   - env: libero_arm
   - wandb: default
-  - goals: goals_arm
+  - goals: goals_arm_static
   - _self_
 
 seed: 42
@@ -20,7 +20,7 @@ training:
 
 eval:
   eval_freq: 100               # eval every N env steps
-  eval_episodes: 1
+  eval_episodes: 5
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
