@@ -6,15 +6,33 @@ from omegaconf import DictConfig
 from utils.logging_utils import setup_logging
 from rlkit.pythonplusplus import identity
 
+
 import numpy as np
 import torch
 from rlkit.torch import pytorch_util as ptu
-
-from rlkit.torch.vae.conv_vae import ConvVAE  # Adaptez le chemin d'import selon votre projet
-from rlkit.torch.vae.conv_vae import imsize48_default_architecture
+from rlkit.torch.vae.conv_vae import ConvVAE, imsize48_default_architecture, imsize84_default_architecture
 from rlkit.torch.vae.vae_trainer import ConvVAETrainer
+from utils.logging_utils import WandBLogger
+import os
+from PIL import Image
+from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
+
+def load_and_preprocess_images(image_dir, imsize=48):
+    image_files = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith('.png')]
+    images = []
+    for img_path in image_files:
+        img = Image.open(img_path).convert('RGB')
+        img = img.resize((imsize, imsize), Image.BILINEAR)
+        img_np = np.array(img, dtype=np.uint8)
+        # (H, W, C) -> (C, H, W)
+        img_np = np.transpose(img_np, (2, 0, 1))
+        images.append(img_np)
+    images = np.stack(images, axis=0)
+    # Flatten for VAE: (N, C*H*W)
+    images = images.reshape(images.shape[0], -1)
+    return images
 
 @hydra.main(config_path="configs", config_name="vae", version_base="1.3")
 def main(cfg: DictConfig):
@@ -22,21 +40,18 @@ def main(cfg: DictConfig):
     logger.info("Starting VAE training.")
     logger.debug("Full config:\n%s", cfg)
 
-    # GET DATA
-    num_train = 1000  # Nombre d'images d'entraînement
-    num_test = 200    # Nombre d'images de test
-    height = 48       # Hauteur des images (doit correspondre à imsize du VAE)
-    width = height        # Largeur des images (doit correspondre à imsize du VAE)
-    channels = 3      # Canaux (3 pour RGB, 1 pour niveaux de gris)
 
-    # Générer des images aléatoires (bruit uniforme entre 0 et 255)
-    train_data = np.random.randint(0, 256, (num_train, channels * height * width), dtype=np.uint8)
-    test_data = np.random.randint(0, 256, (num_test, channels * height * width), dtype=np.uint8)
 
-    train_data = np.array(train_data, dtype=np.uint8)  # Shape: (num_train, height, width, channels)
-    test_data = np.array(test_data, dtype=np.uint8)
+    # Load images from goals_data directory
+    image_dir = os.path.abspath("goals_data")
+    imsize = 84  # Target size for VAE
+    channels = 3
+    all_images = load_and_preprocess_images(image_dir, imsize=imsize)
 
-    ptu.set_gpu_mode(True)  # Utilisez GPU si disponible, sinon False pour CPU
+    # Split into train and test sets (e.g., 80% train, 20% test)
+    train_data, test_data = train_test_split(all_images, test_size=0.2, random_state=42)
+
+    ptu.set_gpu_mode(True)
 
     if cfg.decoder_activation == 'sigmoid':
         decoder_activation = torch.nn.Sigmoid()
@@ -45,34 +60,47 @@ def main(cfg: DictConfig):
 
     model = ConvVAE(
         representation_size=cfg.representation_size,
-        input_channels=channels,  # 3 pour RGB, 1 pour gris
-        architecture=imsize48_default_architecture,
-        imsize=height,  # Taille des images (doit correspondre à vos données)
+        input_channels=channels,
+        architecture=imsize84_default_architecture,
+        imsize=imsize,
         decoder_output_activation=decoder_activation
     )
 
     print(ptu.device)
-
-    model.to(ptu.device)  # Déplacez sur GPU/CPU
+    model.to(ptu.device)
 
     trainer = ConvVAETrainer(
         train_dataset=train_data,
         test_dataset=test_data,
         model=model,
-        batch_size=cfg.batch_size,  # Taille de batch
-        beta=cfg.beta,  # Poids de la divergence KL (0 pour auto-encodeur pur)
-        lr=cfg.lr,  # Taux d'apprentissage
-        # Autres options : log_interval=10, etc.
+        batch_size=cfg.batch_size,
+        beta=cfg.beta,
+        lr=cfg.lr,
     )
 
+    cfg.wandb.log_freq = 1
+    wandb = WandBLogger(cfg)
+
+    #index = 0
     for epoch in range(cfg.num_epochs):
-        trainer.train_epoch(epoch)  # Entraînement sur une époque
-        trainer.test_epoch(epoch)  # Évaluation sur les données de test : genere images debut et resultantes
-        print(f"Epoch {epoch}: Loss = {trainer.get_diagnostics()['train/loss']}")
-        # Optionnel : sauvegardez le modèle ou des reconstructions
-        if epoch % 10 == 0:
-            # trainer.dump_samples(epoch)  # Si vous voulez sauvegarder des échantillons
-            torch.save(model.state_dict(), f'vae_models/model_epoch_{epoch}.pth')
+      trainer.train_epoch(epoch)
+      trainer.test_epoch(epoch)
+      diagnostics = trainer.get_diagnostics()
+      train_loss = diagnostics.get('train/loss', None)
+      test_loss = diagnostics.get('test/loss', None)
+      print(f"Epoch {epoch}: Train Loss = {train_loss}, Test Loss = {test_loss}")
+      # Log to wandb
+      # wandb.log({"epoch": epoch, "train/loss": train_loss, "test/loss": test_loss})
+      wandb.log_scalar(
+                  {
+                    "train_loss": train_loss,
+                    "test_loss": test_loss
+                  }, step=epoch
+              )
+      #index += 1
+      if epoch % 3 == 0:
+          os.makedirs('vae_models', exist_ok=True)
+          torch.save(model.state_dict(), f'vae_models/model_epoch_{epoch}.pth')
 
 
 if __name__ == "__main__":
