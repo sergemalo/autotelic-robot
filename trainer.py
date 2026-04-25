@@ -80,12 +80,16 @@ class Trainer:
         self.episode_num = 0
 
         # ---- Goal management -----------------------------------------
-        # Geneate Goal Dataset
+        # Generate Arm or Object goal dataset
         #self.goal_ds = GoalsDataset(cfg, self.env)
         #self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
         #self.goal_ds.generate()
+
+
+        # Load static goal dataset
         self.goal_ds = StaticArmGoalsDataset(cfg)
         self.goal_ds.load()
+
 
         # Current goal obs — sampled from buffer or set at episode start
         self._goal_obs: Optional[dict] = None
