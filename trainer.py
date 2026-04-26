@@ -440,7 +440,7 @@ class Trainer:
             metrics["eval/mean_latent_distance"],
         )
         if execution_type == "eval":
-            self.wandb.log_scalar(metrics)
+            self.wandb.log_scalar(step=self.total_steps, metrics=metrics)
         return metrics
 
     # ------------------------------------------------------------------
@@ -573,12 +573,12 @@ class Trainer:
 
          # Only recompute rewards for relabeled transitions
         if use_relabeled.any():
-            if self.cfg.reward.name == "privileged":
-                relabeled_rewards = self._recompute_privileged_rewards(
-                    {k: v[use_relabeled] for k, v in next_obs.items()},  
-                    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
-                    self.device
-             )
+            if self.cfg.reward.name in ("privileged_obj", "privileged_arm"):
+                relabeled_rewards = self.reward_fn.compute_batch(
+                    next_obs={k: v[use_relabeled] for k, v in next_obs.items()},
+                    goal_obs={k: v[use_relabeled] for k, v in goal_obs_batch.items()},
+                    device=self.device,
+                )
                 rewards[use_relabeled_gpu] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":

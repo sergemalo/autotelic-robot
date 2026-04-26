@@ -1,6 +1,6 @@
 defaults:
   - encoder: r3m
-  - reward: latent
+  - reward: privileged_arm
   - agent: sac
   - replay_buffer: default
   - env: libero_arm
@@ -22,7 +22,7 @@ training:
     eval_episodes: 5
 
 eval:
-  checkpoint_path: sac_final.pt        # path to checkpoint to evaluate
+  checkpoint_path: L1_latent_sac_step_20000.pt        # path to checkpoint to evaluate
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
