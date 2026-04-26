@@ -194,7 +194,7 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
-                self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
+                #self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
                 self.buffer.end_episode()
 
                 logger.info(
@@ -582,10 +582,10 @@ class Trainer:
                 rewards[use_relabeled_gpu] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":
-                relabeled_rewards = -torch.norm(
-                    z_next[use_relabeled_gpu] - z_goal[use_relabeled_gpu], 
-                    dim=-1, keepdim=True
-                ) * self.cfg.reward.reward_scale
+                relabeled_rewards = self.reward_fn.compute_batch(
+                    z_next[use_relabeled_gpu],
+                    z_goal[use_relabeled_gpu],
+                )
                 rewards[use_relabeled_gpu] = relabeled_rewards
 
 

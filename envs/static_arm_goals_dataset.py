@@ -166,24 +166,26 @@ class StaticArmGoalsDataset:
                 "Make sure load() was called and the dataset file is non-empty."
             )
 
-        if split == "eval":
-            idx = np.random.randint(0, len(goals))
+        idx = np.random.randint(0, len(goals))
 
-        else:  # train split: ε-greedy over LP
-            N = len(goals)
-            lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
+        #if split == "eval":
+        #    idx = np.random.randint(0, len(goals))
+
+        #else:  # train split: ε-greedy over LP
+        #    N = len(goals)
+        #    lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
 
             # ε-greedy proportional probability matching
-            eps = self.cfg.goals.epsilon
-            uniform = np.ones(N) / N
-            lp_sum = lp_values.sum()
+            #eps = self.cfg.goals.epsilon
+            #uniform = np.ones(N) / N
+            #lp_sum = lp_values.sum()
 
-            if lp_sum == 0:
-                probs = uniform  # fallback: all LPs are 0 at the start
-            else:
-                probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+            #if lp_sum == 0:
+            #    probs = uniform  # fallback: all LPs are 0 at the start
+            #else:
+            #    probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
 
-            idx = np.random.choice(N, p=probs)
+            #idx = np.random.choice(N, p=probs)
 
         return goals[idx], idx
 

@@ -52,6 +52,10 @@ def make_reward(cfg: DictConfig) -> BaseReward:
         return LatentReward(
             reward_scale=cfg.reward.reward_scale,
             distance_metric=cfg.reward.distance_metric,
+            reward_offset=cfg.reward.get("reward_offset", 0.0),
+            non_negative=cfg.reward.get("non_negative", False),
+            normalize_distance=cfg.reward.get("normalize_distance", False),
+            distance_norm=cfg.reward.get("distance_norm", "sqrt_latent_dim"),
         )
 
     raise ValueError(f"Unknown reward '{name}'. Choices: privileged, latent.")
