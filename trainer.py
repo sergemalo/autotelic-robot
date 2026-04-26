@@ -251,10 +251,9 @@ class Trainer:
                 episode_steps = 0
 
             # ---- Periodic eval + checkpoint -------------------------
-            if self.total_steps % self.cfg.eval.eval_freq == 0:
-                eval_metrics = self.evaluate()
+            if self.total_steps % self.cfg.training.valid.eval_freq == 0:
+                eval_metrics = self.evaluate(execution_type="train")
                 self.wandb.log_scalar(eval_metrics, self.total_steps)
-
                 # Restore training state: eval borrows the env and leaves
                 # it in an undefined state. Reset everything so the next
                 # training step starts from a clean episode.
@@ -265,15 +264,15 @@ class Trainer:
                 episode_return = 0.0
                 episode_steps = 0
 
-            if self.total_steps % self.cfg.checkpoint_freq == 0:
+            if self.total_steps % self.cfg.training.checkpoint_freq == 0:
                 ckpt_path = os.path.join(
-                    self.cfg.checkpoint_dir,
+                    self.cfg.training.checkpoint_dir,
                     f"sac_step_{self.total_steps}.pt",
                 )
                 self.agent.save(ckpt_path)
 
         # Final checkpoint
-        self.agent.save(os.path.join(self.cfg.checkpoint_dir, "sac_final.pt"))
+        self.agent.save(os.path.join(self.cfg.training.checkpoint_dir, "sac_final.pt"))
         self.wandb.finish()
         logger.info("Training complete.")
 
@@ -281,29 +280,53 @@ class Trainer:
     # Evaluation
     # ------------------------------------------------------------------
 
-    def evaluate(self) -> dict:
+    def evaluate(self, execution_type: str = "train") -> dict:
         """
-        Run cfg.eval.eval_episodes deterministic episodes and return metrics.
+        Run deterministic episodes and return metrics.
+
+        Args:
+            execution_type: "train" or "eval".
+                  - "train": called during train.py, validates using train goals
+                  - "eval":  called during eval.py, evaluates ALL goals from eval split
 
         For each episode, saves:
           - <eval_dir>/step_<N>/ep_<E>_goal.png   — the goal image
           - <eval_dir>/step_<N>/ep_<E>_rollout.mp4 — the full episode video
         """
-        logger.info("Evaluating for %d episodes...", self.cfg.eval.eval_episodes)
+        if execution_type == "train":
+            num_episodes = self.cfg.training.valid.eval_episodes
+            goals_to_eval = None  # sample_goal will be used
+            logger.info("Evaluating for %d episodes from train split...", num_episodes)
+        elif execution_type == "eval":
+            goals_to_eval = self.goal_ds._eval_goals
+            num_episodes = len(goals_to_eval)
+            logger.info("Evaluating all %d goals from eval split...", num_episodes)
+        else:
+            raise ValueError(
+                f"execution_type must be 'train' or 'eval', got '{execution_type}'"
+            )
+
         # Create output directory for this eval checkpoint
-        eval_dir = os.path.join(
-            self.cfg.output_dir, "eval", f"step_{self.total_steps}"
-        )
+        if execution_type == "eval":
+            eval_dir = os.path.join(self.cfg.output_dir, "eval", "full_eval_set")
+        else:
+            eval_dir = os.path.join(
+                self.cfg.output_dir, "eval", f"step_{self.total_steps}"
+            )
         os.makedirs(eval_dir, exist_ok=True)
         logger.info("Saving eval visuals to: %s", eval_dir)
 
         successes, returns, distances = [], [], []
 
-        for ep in range(self.cfg.eval.eval_episodes):
-            goal, _ = self.goal_ds.sample_goal(split="eval")
+        for ep in range(num_episodes):
+            # ---- Get goal for this episode --------------------------
+            if execution_type == "train":
+                goal, _ = self.goal_ds.sample_goal(split="eval")
+            else:  # execution_type == "eval"
+                goal = goals_to_eval[ep]
             
             z_goal = self._get_z_goal(goal)
-
+            
             obs = self.env.reset(goal_coordinates=goal.position, goal_quat=goal.quat)
             goal_obs = goal.obs
             ep_return = 0.0
@@ -389,14 +412,27 @@ class Trainer:
 
             logger.info(
                 "  ep %d/%d | steps=%d | return=%.3f | dist=%.4f | success=%s | pos_err=%.3fm | ori_err=%.3frad",
-                ep + 1, self.cfg.eval.eval_episodes,
+                ep + 1, num_episodes,
                 ep_step, ep_return, dist, success, pos_err, ori_err,
             )
 
             # ---- Log to WandB ---------------------------------------
+            if execution_type == "eval":
+                self.wandb.log_scalar(
+                    {
+                        "eval/episode_return": ep_return,
+                        "eval/episode_length": ep_step,
+                        "eval/success": float(success),
+                        "eval/latent_distance": dist,
+                        "eval/last_pos_error": pos_err,
+                        "eval/last_ori_error": ori_err,
+                    },
+                    step=ep,
+                )            
+            log_step = self.total_steps if execution_type == "train" else ep
             self.wandb.log_images(
-                step=self.total_steps,
-                goal_image=goal.image[::-1],
+                step=log_step,
+                goal_image=goal.image,
                 achieved_image=obs[self.cfg.encoder.camera_key][::-1],
             )
 
@@ -411,6 +447,8 @@ class Trainer:
             metrics["eval/mean_return"],
             metrics["eval/mean_latent_distance"],
         )
+        if execution_type == "eval":
+            self.wandb.log_scalar(metrics)
         return metrics
 
     # ------------------------------------------------------------------
