@@ -7,6 +7,7 @@ import logging
 import os
 from typing import List, Optional
 from tqdm import tqdm
+import wandb
 
 import imageio
 import numpy as np
@@ -440,7 +441,7 @@ class Trainer:
             metrics["eval/mean_latent_distance"],
         )
         if execution_type == "eval":
-            self.wandb.log_scalar(step=self.total_steps, metrics=metrics)
+            wandb.run.summary.update(metrics)            
         return metrics
 
     # ------------------------------------------------------------------

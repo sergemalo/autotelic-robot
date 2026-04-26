@@ -62,6 +62,11 @@ class StaticArmGoalsDataset:
 
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
+        self._seed = int(self.cfg.get("seed", 0))
+        self._sample_rngs = {
+            "train": np.random.default_rng(self._seed),
+            "eval": np.random.default_rng(self._seed + 1),
+        }
         self._train_goals: List[GoalSample] = []
         self._eval_goals:  List[GoalSample] = []
         self.n_total = 0
@@ -94,9 +99,15 @@ class StaticArmGoalsDataset:
         logger.info("Total samples in file: %d", self.n_total)
 
         # --- Reproducible shuffle ---
-        rng = np.random.default_rng(self.cfg.seed)
+        rng = np.random.default_rng(self._seed)
         indices = np.arange(self.n_total)
         rng.shuffle(indices)
+
+        # Reset sampling RNGs on each load so repeated runs are reproducible.
+        self._sample_rngs = {
+            "train": np.random.default_rng(self._seed),
+            "eval": np.random.default_rng(self._seed + 1),
+        }
 
         n_train = int(self.n_total * train_split)
         train_idx = indices[:n_train]
@@ -166,7 +177,7 @@ class StaticArmGoalsDataset:
                 "Make sure load() was called and the dataset file is non-empty."
             )
 
-        idx = np.random.randint(0, len(goals))
+        idx = int(self._sample_rngs[split].integers(0, len(goals)))
 
         #if split == "eval":
         #    idx = np.random.randint(0, len(goals))
