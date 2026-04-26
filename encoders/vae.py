@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import dill
 from encoders.base import BaseEncoder
 
 logger = logging.getLogger(__name__)
@@ -78,40 +78,17 @@ class VAEEncoder(BaseEncoder):
 
     def __init__(
         self,
-        latent_dim: int,
-        encoder_channels: List[int],
-        decoder_channels: List[int],
-        beta: float,
         camera_key: str,
         device: torch.device,
-        image_size: int = 224,
+        latent_dim: int,
+        vae_path: str,
+        vae_imgsize: int
     ):
         super().__init__(camera_key=camera_key, device=device)
 
         self._latent_dim = latent_dim
-        self.beta = beta
-
-        self.conv_encoder = ConvEncoder(encoder_channels).to(device)
-
-        # Compute flattened conv output size with a dummy forward pass
-        with torch.no_grad():
-            dummy = torch.zeros(1, 3, image_size, image_size, device=device)
-            conv_out = self.conv_encoder(dummy)
-            self._conv_flat = int(np.prod(conv_out.shape[1:]))
-
-        self.fc_mu = nn.Linear(self._conv_flat, latent_dim).to(device)
-        self.fc_logvar = nn.Linear(self._conv_flat, latent_dim).to(device)
-
-        self.decoder = ConvDecoder(
-            latent_dim=latent_dim,
-            channels=decoder_channels,
-            output_size=image_size,
-        ).to(device)
-
-        logger.info(
-            "VAE encoder created: latent_dim=%d, beta=%.1f, conv_flat=%d",
-            latent_dim, beta, self._conv_flat,
-        )
+        self._vae_model = torch.load(vae_path, map_location=device, pickle_module=dill)
+        self._vae_imgsize = vae_imgsize
 
     @property
     def latent_dim(self) -> int:
@@ -131,13 +108,21 @@ class VAEEncoder(BaseEncoder):
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         return self.decoder(z)
 
-    def encode(self, obs: Dict[str, np.ndarray]) -> torch.Tensor:
+        reconstructions, _ = self._vae_model.decode(z)# ptu.from_numpy(latents)
+       
+        return reconstructions.view(reconstructions.size(0), 3, self._vae_imgsize, self._vae_imgsize)
+
+    def encode(self, np_img: Dict[str, np.ndarray]) -> torch.Tensor:
         """
         Returns the posterior mean (no noise) — used for policy/reward.
         """
-        img = self.obs_to_image_tensor(obs)
-        with torch.no_grad():
-            mu, _ = self._encode_raw(img)
+        img = self.obs_to_image_tensor(np_img)
+
+        img = F.interpolate(img, size=(self._vae_imgsize, self._vae_imgsize), mode='bilinear', align_corners=False)
+
+        img = img.view(img.size(0), -1)
+        mu, _ = self._vae_model.encode(img)
+
         return mu
 
     def encode_tensor(self, img: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

@@ -36,12 +36,12 @@ def make_encoder(cfg: DictConfig, device: torch.device) -> BaseEncoder:
     if name == "vae":
         from encoders.vae import VAEEncoder
         return VAEEncoder(
-            latent_dim=cfg.encoder.latent_dim,
-            encoder_channels=list(cfg.encoder.encoder_channels),
-            decoder_channels=list(cfg.encoder.decoder_channels),
-            beta=cfg.encoder.beta,
+            latent_dim=cfg.encoder.representation_size,
             camera_key=cfg.encoder.camera_key,
             device=device,
+            vae_path=cfg.encoder.vae_path,
+            vae_imgsize=cfg.encoder.imsize,
         )
 
     raise ValueError(f"Unknown encoder '{name}'. Choices: r3m, vae.")
+  
