@@ -12,15 +12,17 @@ seed: 42
 device: cuda
 
 output_dir: ${hydra:runtime.output_dir}
-checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
-checkpoint_freq: 100000        # save every N env steps
 
 training:
   total_env_steps: 300
+  checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
+  checkpoint_freq: 100000      # save every N env steps
+  valid:
+    eval_freq: 100             # eval every N env steps
+    eval_episodes: 5
 
 eval:
-  eval_freq: 100               # eval every N env steps
-  eval_episodes: 5
+  checkpoint_path: sac_final.pt        # path to checkpoint to evaluate
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
