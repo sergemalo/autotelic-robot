@@ -1,6 +1,6 @@
 defaults:
   - encoder: r3m
-  - reward: privileged_arm
+  - reward: privileged_arm # mettre 'latent' si encoder est VAE
   - agent: sac
   - replay_buffer: default
   - env: libero_arm
@@ -26,4 +26,3 @@ eval:
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
-
