@@ -374,14 +374,14 @@ class Trainer:
             pbar.close()
 
 
-            # Capture the final frame (terminal state — reward shown as 0.0)
+            # Capture the final frame (terminal state)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
             if self.cfg.env.name == "libero_object":
                 obj_pos = obs[self.cfg.reward.object_pos_key]
             else:                    
                 obj_pos = None 
             last_frame = self._annotate_frame(
-                raw_frame, 0.0,
+                raw_frame, r,
                 eef_pos=obs["robot0_eef_pos"],
                 obj_pos=obj_pos,
                 goal_pos=goal.position,
