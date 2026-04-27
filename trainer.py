@@ -67,6 +67,10 @@ class Trainer:
         #self.env = hydra.utils.instantiate(cfg.env, cfg=cfg)
 
         self.encoder: BaseEncoder = make_encoder(cfg, self.device)
+
+        #if(cfg.encoder.name == "vae"):
+        #    cfg.reward = 'latent'
+
         self.reward_fn: BaseReward = make_reward(cfg)
         self.buffer = ReplayBuffer(
             capacity=cfg.replay_buffer.capacity,
@@ -123,7 +127,9 @@ class Trainer:
 
         #z = self.encoder.encode(self._single_obs(obs))
         z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
-        z_goal = self.encoder.encode(self._goal.image)
+
+        z_goal = self._get_z_goal(self._goal)
+
         episode_return = 0.0
         episode_steps = 0
 
@@ -233,7 +239,8 @@ class Trainer:
                 self._goal, self._goal_idx  = self.goal_ds.sample_goal(split="train")
                 # new goal for next episode 
                 self._goal_obs = self._goal.obs
-                z_goal = self.encoder.encode(self._goal.image)
+                
+                z_goal = self._get_z_goal(self._goal)
                 
                 # reset starting obs
 
@@ -319,7 +326,8 @@ class Trainer:
             else:  # execution_type == "eval"
                 goal = goals_to_eval[ep]
             
-            z_goal = self.encoder.encode(goal.image)
+            z_goal = self._get_z_goal(goal)
+            
             obs = self.env.reset(goal_coordinates=goal.position, goal_quat=goal.quat)
             goal_obs = goal.obs
             ep_return = 0.0
@@ -561,6 +569,13 @@ class Trainer:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _get_z_goal(self, goal: GoalSample):
+        if self.cfg.encoder.name == "vae":
+            print('_get_z_goal vae case')
+            return torch.randn(1, self.encoder.latent_dim, device=self.device) # on pige de l'espace lantent prior (normale (0,1))
+        else:
+            return self.encoder.encode(goal.image)
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
