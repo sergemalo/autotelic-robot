@@ -7,6 +7,7 @@ import logging
 import os
 from typing import List, Optional
 from tqdm import tqdm
+import wandb
 
 import imageio
 import numpy as np
@@ -200,7 +201,7 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
-                self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
+                #self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
                 self.buffer.end_episode()
 
                 logger.info(
@@ -381,14 +382,14 @@ class Trainer:
             pbar.close()
 
 
-            # Capture the final frame (terminal state — reward shown as 0.0)
+            # Capture the final frame (terminal state)
             raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()
             if self.cfg.env.name == "libero_object":
                 obj_pos = obs[self.cfg.reward.object_pos_key]
             else:                    
                 obj_pos = None 
             last_frame = self._annotate_frame(
-                raw_frame, 0.0,
+                raw_frame, r,
                 eef_pos=obs["robot0_eef_pos"],
                 obj_pos=obj_pos,
                 goal_pos=goal.position,
@@ -448,7 +449,7 @@ class Trainer:
             metrics["eval/mean_latent_distance"],
         )
         if execution_type == "eval":
-            self.wandb.log_scalar(metrics)
+            wandb.run.summary.update(metrics)            
         return metrics
 
     # ------------------------------------------------------------------
@@ -588,19 +589,19 @@ class Trainer:
 
          # Only recompute rewards for relabeled transitions
         if use_relabeled.any():
-            if self.cfg.reward.name == "privileged":
-                relabeled_rewards = self._recompute_privileged_rewards(
-                    {k: v[use_relabeled] for k, v in next_obs.items()},  
-                    {k: v[use_relabeled] for k, v in goal_obs_batch.items()},
-                    self.device
-             )
+            if self.cfg.reward.name in ("privileged_obj", "privileged_arm"):
+                relabeled_rewards = self.reward_fn.compute_batch(
+                    next_obs={k: v[use_relabeled] for k, v in next_obs.items()},
+                    goal_obs={k: v[use_relabeled] for k, v in goal_obs_batch.items()},
+                    device=self.device,
+                )
                 rewards[use_relabeled_gpu] = relabeled_rewards
                 
             elif self.cfg.reward.name == "latent":
-                relabeled_rewards = -torch.norm(
-                    z_next[use_relabeled_gpu] - z_goal[use_relabeled_gpu], 
-                    dim=-1, keepdim=True
-                ) * self.cfg.reward.reward_scale
+                relabeled_rewards = self.reward_fn.compute_batch(
+                    z_next[use_relabeled_gpu],
+                    z_goal[use_relabeled_gpu],
+                )
                 rewards[use_relabeled_gpu] = relabeled_rewards
 
 

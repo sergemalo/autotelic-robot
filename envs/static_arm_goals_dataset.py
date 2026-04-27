@@ -62,6 +62,11 @@ class StaticArmGoalsDataset:
 
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
+        self._seed = int(self.cfg.get("seed", 0))
+        self._sample_rngs = {
+            "train": np.random.default_rng(self._seed),
+            "eval": np.random.default_rng(self._seed + 1),
+        }
         self._train_goals: List[GoalSample] = []
         self._eval_goals:  List[GoalSample] = []
         self.n_total = 0
@@ -94,9 +99,15 @@ class StaticArmGoalsDataset:
         logger.info("Total samples in file: %d", self.n_total)
 
         # --- Reproducible shuffle ---
-        rng = np.random.default_rng(self.cfg.seed)
+        rng = np.random.default_rng(self._seed)
         indices = np.arange(self.n_total)
         rng.shuffle(indices)
+
+        # Reset sampling RNGs on each load so repeated runs are reproducible.
+        self._sample_rngs = {
+            "train": np.random.default_rng(self._seed),
+            "eval": np.random.default_rng(self._seed + 1),
+        }
 
         n_train = int(self.n_total * train_split)
         train_idx = indices[:n_train]
@@ -166,24 +177,26 @@ class StaticArmGoalsDataset:
                 "Make sure load() was called and the dataset file is non-empty."
             )
 
-        if split == "eval":
-            idx = np.random.randint(0, len(goals))
+        idx = int(self._sample_rngs[split].integers(0, len(goals)))
 
-        else:  # train split: ε-greedy over LP
-            N = len(goals)
-            lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
+        #if split == "eval":
+        #    idx = np.random.randint(0, len(goals))
+
+        #else:  # train split: ε-greedy over LP
+        #    N = len(goals)
+        #    lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
 
             # ε-greedy proportional probability matching
-            eps = self.cfg.goals.epsilon
-            uniform = np.ones(N) / N
-            lp_sum = lp_values.sum()
+            #eps = self.cfg.goals.epsilon
+            #uniform = np.ones(N) / N
+            #lp_sum = lp_values.sum()
 
-            if lp_sum == 0:
-                probs = uniform  # fallback: all LPs are 0 at the start
-            else:
-                probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+            #if lp_sum == 0:
+            #    probs = uniform  # fallback: all LPs are 0 at the start
+            #else:
+            #    probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
 
-            idx = np.random.choice(N, p=probs)
+            #idx = np.random.choice(N, p=probs)
 
         return goals[idx], idx
 

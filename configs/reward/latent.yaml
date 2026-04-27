@@ -3,3 +3,14 @@ name: latent
 reward_scale: 1.0
 # Distance metric in latent space
 distance_metric: euclidean    # euclidean | cosine
+
+# Reward shaping for non-negative latent rewards:
+# reward = reward_scale * max(0, reward_offset - normalized_distance)
+reward_offset: 1.0
+non_negative: true
+
+# If true, distance is normalized before applying the offset.
+# - euclidean: distance / sqrt(latent_dim)
+# - cosine: (1 - cosine_similarity) / 2  in [0, 1]
+normalize_distance: true
+distance_norm: sqrt_latent_dim

@@ -89,3 +89,28 @@ class PrivilegedRewardArm(BaseReward):
 
         reward = 0.5 * (pos_reward + ori_reward) * self.reward_scale
         return reward
+
+    def compute_batch(
+        self,
+        next_obs: Dict[str, np.ndarray],
+        goal_obs: Dict[str, np.ndarray],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Compute privileged arm rewards for a relabeled batch as (B, 1)."""
+        eef_pos = torch.as_tensor(next_obs[self.eef_pos_key], dtype=torch.float32, device=device)
+        eef_ori = torch.as_tensor(next_obs[self.eef_ori_key], dtype=torch.float32, device=device)
+        goal_pos = torch.as_tensor(goal_obs[self.goal_eef_pos_key], dtype=torch.float32, device=device)
+        goal_ori = torch.as_tensor(goal_obs[self.goal_eef_ori_key], dtype=torch.float32, device=device)
+
+        pos_dist = torch.linalg.vector_norm(eef_pos - goal_pos, dim=-1, keepdim=True)
+
+        # Quaternion geodesic distance in [0, 1]
+        eef_ori = eef_ori / (torch.linalg.vector_norm(eef_ori, dim=-1, keepdim=True) + 1e-8)
+        goal_ori = goal_ori / (torch.linalg.vector_norm(goal_ori, dim=-1, keepdim=True) + 1e-8)
+        dot = torch.sum(eef_ori * goal_ori, dim=-1, keepdim=True).abs().clamp(0.0, 1.0)
+        ori_dist = (2.0 / np.pi) * torch.arccos(dot)
+
+        pos_reward = self.pos_offset - pos_dist
+        ori_reward = self.ori_offset - ori_dist
+        reward = 0.5 * (pos_reward + ori_reward) * self.reward_scale
+        return reward

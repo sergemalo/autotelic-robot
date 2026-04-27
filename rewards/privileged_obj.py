@@ -70,3 +70,24 @@ class PrivilegedRewardObj(BaseReward):
             raise ValueError(f"Unknown reward_type: {self.reward_type}")
 
         return self.reward_scale * reward
+
+    def compute_batch(
+        self,
+        next_obs: Dict[str, np.ndarray],
+        goal_obs: Dict[str, np.ndarray],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Compute privileged object rewards for a relabeled batch as (B, 1)."""
+        pos_next = torch.as_tensor(next_obs[self.object_pos_key], dtype=torch.float32, device=device)
+        pos_goal = torch.as_tensor(goal_obs[self.object_pos_key], dtype=torch.float32, device=device)
+
+        dist = torch.linalg.vector_norm(pos_next - pos_goal, dim=-1, keepdim=True)
+
+        if self.reward_type == "negative_distance":
+            reward = -dist + self.reward_offset
+        elif self.reward_type == "sparse":
+            reward = (dist < self.sparse_threshold).to(torch.float32)
+        else:
+            raise ValueError(f"Unknown reward_type: {self.reward_type}")
+
+        return self.reward_scale * reward
