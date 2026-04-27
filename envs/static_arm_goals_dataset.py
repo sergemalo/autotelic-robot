@@ -115,17 +115,29 @@ class StaticArmGoalsDataset:
         )
 
         # --- Build GoalSample lists ---
-        self._train_goals = self._build_goals(images, eef_pos, eef_quat, obs_dicts, train_idx, "train")
+        if cfg.level in (1, 2):
+            self._train_goals = self._build_goals(images, eef_pos, eef_quat, obs_dicts, train_idx, "train")
+        elif cfg.level in (3):
+            latent_data_path = cfg.goals.latent_dataset_path
+            latent_data = np.load(latent_data_path, allow_pickle=True)
+            # build goals from latent_data
+            self._train_goals = None # build goals from latent_data
+
         self._eval_goals  = self._build_goals(images, eef_pos, eef_quat, obs_dicts, eval_idx,  "eval")
 
         logger.info("Dataset loaded. train=%d  eval=%d", self.n_train, self.n_eval)
 
-
-        self.load_modules()
+        if cfg.level in (2, 3):
+            self.load_modules()
 
     def load_modules(self):
         # Load pre-computed modules for level 2 and level 3 from files
-        self.modules_info = np.load("modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
+
+        if cfg.level in (2):
+            self.modules_info = np.load("modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
+        elif cfg.level in (3):
+            self.modules_info = np.load("modules_l3.npz") 
+
         self.modules = self.modules_info['centroids']  # (n_modules, 7)
         
         for module_idx in range(len(self.modules)):
@@ -191,6 +203,8 @@ class StaticArmGoalsDataset:
             return self._eval_goals[idx], None  # No module index for eval goals
 
         else:  
+            # ===== a fixer pour s'assurer que niveau 1 marche encore
+
             module_idx = self.sample_module()  # Sample a module index based on LP
             goal_indices = self.modularized_goals[module_idx]  # Get goal indices for this module
             goal_idx = np.random.choice(goal_indices)  # Sample a goal index from this module

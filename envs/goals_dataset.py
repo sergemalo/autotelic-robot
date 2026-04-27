@@ -70,6 +70,7 @@ class GoalSample:
     image: np.ndarray
     position: np.ndarray                  # float32 (3,)
     quat: Optional[np.ndarray] = None     # float32 (4,) or None
+    latent_representation: Optional[np.ndarray] = None
 
     def save_image_to_file(self, image_path: str, reverse = False) -> None:
         if reverse:

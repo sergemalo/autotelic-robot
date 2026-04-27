@@ -89,12 +89,9 @@ class Trainer:
         #self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
         #self.goal_ds.generate()
 
-        if self.cfg.level in (1, 2):
-            # Load static goal dataset
-            self.goal_ds = StaticArmGoalsDataset(cfg)
-            self.goal_ds.load()
-        else:
-            ...
+         # Load static goal dataset
+        self.goal_ds = StaticArmGoalsDataset(cfg)
+        self.goal_ds.load()
 
 
         # Current goal obs — sampled from buffer or set at episode start
@@ -131,11 +128,7 @@ class Trainer:
         #z = self.encoder.encode(self._single_obs(obs))
         z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
         
-        if self.cfg.level in (1, 2): 
-    
-            z_goal = self.encoder.encode(self._goal.image)
-        else:
-            z_goal = self._goal 
+        z_goal = self._get_z_goal(self._goal)
 
         episode_return = 0.0
         episode_steps = 0
@@ -333,7 +326,7 @@ class Trainer:
             else:  # execution_type == "eval"
                 goal = goals_to_eval[ep]
             
-            z_goal = self._get_z_goal(goal)
+            z_goal = self._get_z_goal(goal, goal_split_origin='eval')
             
             obs = self.env.reset(goal_coordinates=goal.position, goal_quat=goal.quat)
             goal_obs = goal.obs
@@ -577,12 +570,11 @@ class Trainer:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _get_z_goal(self, goal: GoalSample):
-        if self.cfg.encoder.name == "vae":
-            print('_get_z_goal vae case')
-            return torch.randn(1, self.encoder.latent_dim, device=self.device) # on pige de l'espace lantent prior (normale (0,1))
+    def _get_z_goal(self, goal: GoalSample, goal_split_origin = 'train'):        
+        if self.cfg.level in (1, 2) or goal_split_origin == 'eval': 
+            z_goal = self.encoder.encode(self._goal.image)
         else:
-            return self.encoder.encode(goal.image)
+            z_goal = self._goal
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
