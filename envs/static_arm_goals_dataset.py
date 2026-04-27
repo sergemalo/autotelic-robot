@@ -121,7 +121,7 @@ class StaticArmGoalsDataset:
             latent_data_path = cfg.goals.latent_dataset_path
             latent_data = np.load(latent_data_path, allow_pickle=True)
             # build goals from latent_data
-            self._train_goals = None # build goals from latent_data
+            self._train_goals = self._build_latent_goals(latent_data) # build goals from latent_data
 
         self._eval_goals  = self._build_goals(images, eef_pos, eef_quat, obs_dicts, eval_idx,  "eval")
 
@@ -169,6 +169,19 @@ class StaticArmGoalsDataset:
             goals.append(goal)
         return goals
 
+    def _build_latent_goals(latent_data):
+        goals = []
+        for latent_goal in latent_data:
+            goal = GoalSample(
+                obs=None,          # dict[str, np.ndarray]
+                image=None,           # uint8 (H, W, 3)
+                position=None,
+                quat=None,
+                latent_representation=latent_goal
+            )
+            goals.append(goal)
+        return goals
+
     # ------------------------------------------------------------------
     # Sampling
     # ------------------------------------------------------------------
@@ -202,7 +215,7 @@ class StaticArmGoalsDataset:
             idx = np.random.randint(0, len(goals))
             return self._eval_goals[idx], None  # No module index for eval goals
 
-        else:  
+        elif self.cfg.level in (2,3):  
             # ===== a fixer pour s'assurer que niveau 1 marche encore
 
             module_idx = self.sample_module()  # Sample a module index based on LP
@@ -210,7 +223,9 @@ class StaticArmGoalsDataset:
             goal_idx = np.random.choice(goal_indices)  # Sample a goal index from this module
     
             return self._train_goals[goal_idx], module_idx  # Return the sampled goal and its module index
-
+        else:
+            idx = np.random.randint(0, len(goals))
+            return self._train_goals[idx], None
 
     def sample_module(self) -> int:
 

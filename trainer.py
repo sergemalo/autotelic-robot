@@ -574,7 +574,7 @@ class Trainer:
         if self.cfg.level in (1, 2) or goal_split_origin == 'eval': 
             z_goal = self.encoder.encode(self._goal.image)
         else:
-            z_goal = self._goal
+            z_goal = self._goal.latent_representation
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
