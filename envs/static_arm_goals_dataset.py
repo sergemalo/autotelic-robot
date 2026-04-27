@@ -62,6 +62,11 @@ class StaticArmGoalsDataset:
 
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
+        self._seed = int(self.cfg.get("seed", 0))
+        self._sample_rngs = {
+            "train": np.random.default_rng(self._seed),
+            "eval": np.random.default_rng(self._seed + 1),
+        }
         self._train_goals: List[GoalSample] = []
         self._eval_goals:  List[GoalSample] = []
         self.n_total = 0
@@ -97,9 +102,15 @@ class StaticArmGoalsDataset:
         logger.info("Total samples in file: %d", self.n_total)
 
         # --- Reproducible shuffle ---
-        rng = np.random.default_rng(self.cfg.seed)
+        rng = np.random.default_rng(self._seed)
         indices = np.arange(self.n_total)
         rng.shuffle(indices)
+
+        # Reset sampling RNGs on each load so repeated runs are reproducible.
+        self._sample_rngs = {
+            "train": np.random.default_rng(self._seed),
+            "eval": np.random.default_rng(self._seed + 1),
+        }
 
         n_train = int(self.n_total * train_split)
         train_idx = indices[:n_train]
@@ -115,10 +126,10 @@ class StaticArmGoalsDataset:
         )
 
         # --- Build GoalSample lists ---
-        if cfg.level in (1, 2):
+        if self.cfg.level in (1, 2):
             self._train_goals = self._build_goals(images, eef_pos, eef_quat, obs_dicts, train_idx, "train")
-        elif cfg.level in (3):
-            latent_data_path = cfg.goals.latent_dataset_path
+        elif self.cfg.level in (3):
+            latent_data_path = self.cfg.goals.latent_dataset_path
             latent_data = np.load(latent_data_path, allow_pickle=True)
             # build goals from latent_data
             self._train_goals = self._build_latent_goals(latent_data) # build goals from latent_data
@@ -127,15 +138,15 @@ class StaticArmGoalsDataset:
 
         logger.info("Dataset loaded. train=%d  eval=%d", self.n_train, self.n_eval)
 
-        if cfg.level in (2, 3):
+        if self.cfg.level in (2, 3):
             self.load_modules()
 
     def load_modules(self):
         # Load pre-computed modules for level 2 and level 3 from files
 
-        if cfg.level in (2):
+        if self.cfg.level in (2):
             self.modules_info = np.load("modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
-        elif cfg.level in (3):
+        elif self.cfg.level in (3):
             self.modules_info = np.load("modules_l3.npz") 
 
         self.modules = self.modules_info['centroids']  # (n_modules, 7)

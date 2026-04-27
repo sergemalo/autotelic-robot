@@ -4,7 +4,7 @@
 camera_key: agentview_image   # informational only; images are pre-extracted in the .npz
 
 # Path to the .npz file produced by gen_arm_dataset.py
-dataset_path: arm_dataset.npz             # must be set on the command line or in a child config
+dataset_path: arm_dataset_10k.npz             # must be set on the command line or in a child config
 
 latent_dataset_path: latent_train_subset.npz
 
