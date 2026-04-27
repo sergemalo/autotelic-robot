@@ -67,8 +67,11 @@ class StaticArmGoalsDataset:
         self.n_total = 0
         self.n_train = 0
         self.n_eval  = 0
+        self.modules = [] # To store pre-computed modules for level 2
+        self.modularized_goals = [] # To store the indices of goals belonging to each module
         self._results_queues: List = []  # For tracking results for each goal
         self._lps: List = []  # For tracking learning progress for each goal
+
 
     # ------------------------------------------------------------------
     # Loading
@@ -116,6 +119,23 @@ class StaticArmGoalsDataset:
         self._eval_goals  = self._build_goals(images, eef_pos, eef_quat, obs_dicts, eval_idx,  "eval")
 
         logger.info("Dataset loaded. train=%d  eval=%d", self.n_train, self.n_eval)
+
+
+        self.load_modules()
+
+    def load_modules(self):
+        # Load pre-computed modules for level 2 and level 3 from files
+        self.modules_info = np.load("modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
+        self.modules = self.modules_info['centroids']  # (n_modules, 7)
+        
+        for module_idx in range(len(self.modules)):
+            self._results_queues.append([])  # Initialize empty results queue for each module
+            self._lps.append(0.0)  # Initialize LP for each module to 0.0
+            self.modularized_goals.append(np.where(self.modules_info['cluster_labels'] == self.modules[module_idx])[0])  # Indices of goals in this module
+
+
+
+
 
     def _build_goals(
         self,
@@ -168,30 +188,47 @@ class StaticArmGoalsDataset:
 
         if split == "eval":
             idx = np.random.randint(0, len(goals))
+            return self._eval_goals[idx], None  # No module index for eval goals
 
-        else:  # train split: ε-greedy over LP
-            N = len(goals)
-            lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
+        else:  
+            module_idx = self.sample_module()  # Sample a module index based on LP
+            goal_indices = self.modularized_goals[module_idx]  # Get goal indices for this module
+            goal_idx = np.random.choice(goal_indices)  # Sample a goal index from this module
+    
+            return self._train_goals[goal_idx], module_idx  # Return the sampled goal and its module index
 
-            # ε-greedy proportional probability matching
-            eps = self.cfg.goals.epsilon
-            uniform = np.ones(N) / N
-            lp_sum = lp_values.sum()
 
-            if lp_sum == 0:
-                probs = uniform  # fallback: all LPs are 0 at the start
-            else:
-                probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+    def sample_module(self) -> int:
 
-            idx = np.random.choice(N, p=probs)
+        N = len(self.modules)  # number of modules
+        lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
 
-        return goals[idx], idx
+        # ε-greedy proportional probability matching
+        eps = self.cfg.goals.epsilon
+        uniform = np.ones(N) / N
+        lp_sum = lp_values.sum()
 
-    def _update_intrinsic_motivation(self, goal_idx: int, result: float):
-        results = self._results_queues[goal_idx]
+        if lp_sum == 0:
+            probs = uniform  # fallback: all LPs are 0 at the start
+        else:
+            probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+
+        module_idx = np.random.choice(N, p=probs)
+
+        return module_idx
+    
+
+
+
+
+    def _update_intrinsic_motivation(self, module_idx: int, result: float):
+        results = self._results_queues[module_idx]
         results.append(result)
-        n_eval = len(results)
-        self._lps[goal_idx] = compute_lp(results, n_eval)
+       
+        if len(results) > 20:  # Keep only the most recent 20 results
+            results.pop(0)
+
+        self._lps[module_idx] = compute_lp(results)
 
     # ------------------------------------------------------------------
     # Convenience accessors

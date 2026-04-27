@@ -26,3 +26,5 @@ eval:
 
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+
+level: 2

@@ -10,7 +10,8 @@ def compute_competence(results_window):
 
 # Compute learning progress as:
 #   difference between the competence of the last l results and the competence of the previous l results
-def compute_lp(results, n_eval, l=10):
+def compute_lp(results, l=10):
+    n_eval = len(results)
     # Not enough evaluations yet to fill both windows → return 0
     if n_eval < 2 * l :
         return 0.0

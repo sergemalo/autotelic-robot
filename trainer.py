@@ -89,7 +89,7 @@ class Trainer:
         #self.goal_ds = _GOALS_CLASSES[cfg.env.name](cfg, self.env)
         #self.goal_ds.generate()
 
-        if self.cfg.level == 2:
+        if self.cfg.level in (1, 2):
             # Load static goal dataset
             self.goal_ds = StaticArmGoalsDataset(cfg)
             self.goal_ds.load()
@@ -121,8 +121,6 @@ class Trainer:
         #self._goal = self.goal_ds.sample_goal()
         self._goal, self._module_idx  = self.goal_ds.sample_goal(split="train")  
 
-
-
         self._goal_obs = self._goal.obs
 
         #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
@@ -133,12 +131,11 @@ class Trainer:
         #z = self.encoder.encode(self._single_obs(obs))
         z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
         
-        
-        if self.cfg.level == 1 or self.cfg.level == 2: # revoir
+        if self.cfg.level in (1, 2): 
+    
             z_goal = self.encoder.encode(self._goal.image)
         else:
-            # z_goal = self._goal.?
-
+            z_goal = self._goal 
 
         episode_return = 0.0
         episode_steps = 0
@@ -211,7 +208,7 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
-                self.goal_ds._update_intrinsic_motivation(self._goal_idx, self.env.check_custom_success(obs))
+                self.goal_ds._update_intrinsic_motivation(self._module_idx, self.env.check_custom_success(obs))
                 self.buffer.end_episode()
 
                 logger.info(
@@ -246,7 +243,7 @@ class Trainer:
                 # Reset for next episode
                 self.episode_num += 1
 
-                self._goal, self._goal_idx  = self.goal_ds.sample_goal(split="train")
+                self._goal, self._module_idx  = self.goal_ds.sample_goal(split="train")
                 # new goal for next episode 
                 self._goal_obs = self._goal.obs
                 
@@ -268,7 +265,7 @@ class Trainer:
                 # Restore training state: eval borrows the env and leaves
                 # it in an undefined state. Reset everything so the next
                 # training step starts from a clean episode.
-                self._goal, self._goal_idx = self.goal_ds.sample_goal(split="train")
+                self._goal, self._module_idx = self.goal_ds.sample_goal(split="train")
                 self._goal_obs = self._goal.obs
                 obs = self.env.reset(goal_coordinates=self._goal.position, goal_quat=self._goal.quat)
                 z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
