@@ -107,6 +107,8 @@ class Trainer:
     def train(self):
         logger.info("Starting training for %d env steps.", self.cfg.training.total_env_steps)
 
+
+        # ------------------------------- Warm-up phase --------------------------------------
         # Initial obs and encoding
         obs = self.env.reset()
 
@@ -114,21 +116,24 @@ class Trainer:
         logger.info("Warm-up phase: %d random steps.", self.cfg.agent.warmup_steps)
         self._warmup(obs) 
     
+        
+        # -------------------------- Main training loop --------------------------------------
         # Set a goal for the first episode
-        #self._goal = self.goal_ds.sample_goal()
         self._goal, self._module_idx  = self.goal_ds.sample_goal(split="train")  
+        
+        
+        self._goal_obs = self._goal.obs # None if level 2 or 3
 
-        self._goal_obs = self._goal.obs
+        
+        z_goal = self._get_z_goal(self._goal)
 
-        #goal_coordinates = get_object_pos(self._goal_obs, self.env.object_name)
+        obs = self.reset_env(goal = self._goal, z_goal = z_goal)  # reset environment with the first goal
 
-        obs = self.env.reset(goal_coordinates = self._goal.position, goal_quat=self._goal.quat)
 
         # Encode obs
         #z = self.encoder.encode(self._single_obs(obs))
         z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
         
-        z_goal = self._get_z_goal(self._goal)
 
         episode_return = 0.0
         episode_steps = 0
@@ -201,7 +206,11 @@ class Trainer:
 
             # ---- Episode end ----------------------------------------
             if done:
-                self.goal_ds._update_intrinsic_motivation(self._module_idx, self.env.check_custom_success(obs))
+                if self.cfg.level == 3:
+                    self.goal_ds._update_intrinsic_motivation(self._module_idx, self.env.check_custom_success(z, level=3))
+                else:
+                    self.goal_ds._update_intrinsic_motivation(self._module_idx, self.env.check_custom_success(obs, level=self.cfg.level))
+                    
                 self.buffer.end_episode()
 
                 logger.info(
@@ -243,8 +252,7 @@ class Trainer:
                 z_goal = self._get_z_goal(self._goal)
                 
                 # reset starting obs
-
-                obs = self.env.reset(goal_coordinates = self._goal.position, goal_quat=self._goal.quat)
+                obs = self.reset_env(goal = self._goal, z_goal = z_goal)
                 z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
 
                 # reset episode return and steps
@@ -260,7 +268,7 @@ class Trainer:
                 # training step starts from a clean episode.
                 self._goal, self._module_idx = self.goal_ds.sample_goal(split="train")
                 self._goal_obs = self._goal.obs
-                obs = self.env.reset(goal_coordinates=self._goal.position, goal_quat=self._goal.quat)
+                obs = self.reset_env(goal = self._goal, z_goal = z_goal)
                 z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
                 episode_return = 0.0
                 episode_steps = 0
@@ -328,7 +336,7 @@ class Trainer:
             
             z_goal = self._get_z_goal(goal, goal_split_origin='eval')
             
-            obs = self.env.reset(goal_coordinates=goal.position, goal_quat=goal.quat)
+            obs = self.reset_env(goal = self._goal, z_goal = z_goal)
             goal_obs = goal.obs
             ep_return = 0.0
             done = False
@@ -569,6 +577,16 @@ class Trainer:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+
+    def reset_env(self, goal = None, z_goal = None):
+        if self.cfg.level == 3:
+            obs = self.env.reset(latent_goal = goal)
+        else:
+            obs = self.env.reset(goal_coordinates = goal.position, goal_quat=goal.quat)
+        return obs
+
+
 
     def _get_z_goal(self, goal: GoalSample, goal_split_origin = 'train'):        
         if self.cfg.level in (1, 2) or goal_split_origin == 'eval': 

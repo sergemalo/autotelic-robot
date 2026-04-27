@@ -430,6 +430,7 @@ class LiberoArmEnv(LiberoEnv):
     def __init__(self, cfg: DictConfig):
         self.target_pos  = np.zeros(3)   # EEF xyz
         self.target_quat = np.array([1.0, 0.0, 0.0, 0.0])  # EEF quaternion (w,x,y,z)
+        self.target_latent = None  # for level 3
         super().__init__(cfg)
 
     def _make_bddl(self) -> str:
@@ -439,6 +440,7 @@ class LiberoArmEnv(LiberoEnv):
         self,
         goal_coordinates: np.ndarray = None,   # (3,)  EEF xyz
         goal_quat: np.ndarray = None,           # (4,)  EEF quaternion
+        latent_goal = None,                            # for level 3
     ) -> Dict[str, np.ndarray]:
         self._env.reset()
         self._env.set_init_state(self._init_state)
@@ -448,35 +450,48 @@ class LiberoArmEnv(LiberoEnv):
             self.target_pos = np.array(goal_coordinates)
         if goal_quat is not None:
             self.target_quat = np.array(goal_quat)
+        if latent_goal is not None:
+            self.target_latent = latent_goal
+
 
         logger.info("RESETTING LiberoArmEnv")
         logger.info("--> Goal EEF position:    %s", self.target_pos)
         logger.info("--> Goal EEF quaternion:  %s", self.target_quat)
+        logger.info("--> Goal latent:          %s", self.target_latent)
 
         obs, _, _, _ = self._env.step([0.0] * self.action_dim)
         self.obs = obs
         logger.info("--> Current EEF position: %s", obs.get("robot0_eef_pos"))
         logger.info("--> Current EEF quat:     %s", obs.get("robot0_eef_quat"))
+        logger.info("--> Current latent:       %s", obs.get("latent_obs"))
+
         return obs
 
-    def check_custom_success(self, obs: dict) -> SuccessInfo:
-        # --- position ---
-        eef_pos = obs.get("robot0_eef_pos")
-        if eef_pos is None:
-            logger.warning("'robot0_eef_pos' not in obs — cannot check success.")
-            return SuccessInfo(success=False, pos_err=float("inf"), ori_err=float("inf"))
-        pos_err = float(np.linalg.norm(np.array(eef_pos) - self.target_pos))
+    def check_custom_success(self, obs, level) -> SuccessInfo:
+        if level in (1,2):
+            # --- position ---
+            eef_pos = obs.get("robot0_eef_pos")
+            if eef_pos is None:
+                logger.warning("'robot0_eef_pos' not in obs — cannot check success.")
+                return SuccessInfo(success=False, pos_err=float("inf"), ori_err=float("inf"))
+            pos_err = float(np.linalg.norm(np.array(eef_pos) - self.target_pos))
 
-        # --- orientation ---
-        eef_quat = obs.get("robot0_eef_quat")
-        if eef_quat is None:
-            logger.warning("'robot0_eef_quat' not in obs — cannot check success.")
-            return SuccessInfo(success=False, pos_err=pos_err, ori_err=float("inf"))
-        dot = np.abs(np.dot(np.array(eef_quat), self.target_quat))
-        ori_err = float(np.arccos(np.clip(dot, 0.0, 1.0)))
+            # --- orientation ---
+            eef_quat = obs.get("robot0_eef_quat")
+            if eef_quat is None:
+                logger.warning("'robot0_eef_quat' not in obs — cannot check success.")
+                return SuccessInfo(success=False, pos_err=pos_err, ori_err=float("inf"))
+            dot = np.abs(np.dot(np.array(eef_quat), self.target_quat))
+            ori_err = float(np.arccos(np.clip(dot, 0.0, 1.0)))
 
-        success = (
-            pos_err < self.cfg.env.success_pos_threshold
-            and ori_err < self.cfg.env.success_ori_threshold
-        )
+            success = (
+                pos_err < self.cfg.env.success_pos_threshold
+                and ori_err < self.cfg.env.success_ori_threshold
+            )
+        else:
+            # For level 3, success is determined by proximity in latent space.
+            pos_err = float(np.linalg.norm(np.array(obs) - self.target_latent))
+            ori_err = 0.0  # orientation not checked for level 3
+            success = pos_err < self.cfg.env.success_latent_threshold 
+
         return SuccessInfo(success=success, pos_err=pos_err, ori_err=ori_err)
