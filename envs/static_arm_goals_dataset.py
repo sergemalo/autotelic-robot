@@ -128,11 +128,11 @@ class StaticArmGoalsDataset:
         # --- Build GoalSample lists ---
         if self.cfg.level in (1, 2):
             self._train_goals = self._build_goals(images, eef_pos, eef_quat, obs_dicts, train_idx, "train")
-        elif self.cfg.level in (3):
+        elif self.cfg.level == 3:
             latent_data_path = self.cfg.goals.latent_dataset_path
             latent_data = np.load(latent_data_path, allow_pickle=True)
             # build goals from latent_data
-            self._train_goals = self._build_latent_goals(latent_data) # build goals from latent_data
+            self._train_goals = self._build_latent_goals(latent_data['latent_train_subset']) # build goals from latent_data
 
         self._eval_goals  = self._build_goals(images, eef_pos, eef_quat, obs_dicts, eval_idx,  "eval")
 
@@ -144,17 +144,21 @@ class StaticArmGoalsDataset:
     def load_modules(self):
         # Load pre-computed modules for level 2 and level 3 from files
 
-        if self.cfg.level in (2):
-            self.modules_info = np.load("modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
-        elif self.cfg.level in (3):
-            self.modules_info = np.load("modules_l3.npz") 
+        if self.cfg.level == 2:
+            self.modules_info = np.load("intrinsic_motivation/modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
+        elif self.cfg.level == 3:
+            self.modules_info = np.load("intrinsic_motivation/modules_l3.npz") 
 
         self.modules = self.modules_info['centroids']  # (n_modules, 7)
         
         for module_idx in range(len(self.modules)):
             self._results_queues.append([])  # Initialize empty results queue for each module
             self._lps.append(0.0)  # Initialize LP for each module to 0.0
-            self.modularized_goals.append(np.where(self.modules_info['cluster_labels'] == self.modules[module_idx])[0])  # Indices of goals in this module
+
+            self.modularized_goals.append([])  # Initialize empty list for this module
+            for goal_idx, label in enumerate(self.modules_info['cluster_labels']):
+                if label == module_idx:
+                    self.modularized_goals[module_idx].append(goal_idx)  # Indices of goals in this module
 
 
 
@@ -180,7 +184,7 @@ class StaticArmGoalsDataset:
             goals.append(goal)
         return goals
 
-    def _build_latent_goals(latent_data):
+    def _build_latent_goals(self, latent_data):
         goals = []
         for latent_goal in latent_data:
             goal = GoalSample(
@@ -232,7 +236,6 @@ class StaticArmGoalsDataset:
             module_idx = self.sample_module()  # Sample a module index based on LP
             goal_indices = self.modularized_goals[module_idx]  # Get goal indices for this module
             goal_idx = np.random.choice(goal_indices)  # Sample a goal index from this module
-    
             return self._train_goals[goal_idx], module_idx  # Return the sampled goal and its module index
         else:
             idx = np.random.randint(0, len(goals))

@@ -13,6 +13,8 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 from omegaconf import DictConfig
+from encoders.base import BaseEncoder
+
 
 logger = logging.getLogger(__name__)
 
@@ -224,13 +226,14 @@ class LiberoEnv:
       - check_custom_success(obs) -> SuccessInfo
     """
 
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, encoder=None):
         from libero.libero.envs import OffScreenRenderEnv
 
         self.cfg = cfg
         self.episode_step = 0
         self.action_dim = cfg.env.action_dim
         self.obs: Optional[Dict[str, np.ndarray]] = None
+        self.encoder = encoder
 
         bddl_path = self._make_bddl()
 
@@ -253,7 +256,7 @@ class LiberoEnv:
     def reset(self, goal_coordinates: np.ndarray = None) -> Dict[str, np.ndarray]:
         raise NotImplementedError
 
-    def check_custom_success(self, obs: dict) -> SuccessInfo:
+    def check_custom_success(self, obs: dict, z: np.ndarray) -> SuccessInfo:
         raise NotImplementedError
 
     def step(
@@ -269,9 +272,10 @@ class LiberoEnv:
             (next_obs, reward, done, info)
         """
         obs, reward, done, info = self._env.step(action.tolist())
+        z_next = self.encoder.encode(obs[self.cfg.encoder.camera_key])
         self.episode_step += 1
 
-        success_info = self.check_custom_success(obs)
+        success_info = self.check_custom_success(obs, z_next)
 
         truncated = self.episode_step >= self.cfg.env.episode_length
         if truncated:
@@ -286,7 +290,7 @@ class LiberoEnv:
         done = success_info.success or truncated
         self.obs = obs
         info["success_info"] = success_info
-        return obs, float(reward), done, info
+        return obs, z_next, float(reward), done, info
 
     def check_success(self) -> bool:
         """Query LIBERO's built-in task success condition."""
@@ -340,7 +344,7 @@ class LiberoObjectEnv(LiberoEnv):
         logger.info("--> Object position: %s", get_object_pos(obs, self.object_name))
         return obs
 
-    def check_custom_success(self, obs: dict) -> SuccessInfo:
+    def check_custom_success(self, obs: dict, z: np.ndarray) -> SuccessInfo:
         obj_pos = get_object_pos(obs, self.object_name)
         if obj_pos is None:
             return SuccessInfo(success=False, pos_err=float("inf"))
@@ -427,11 +431,11 @@ class LiberoArmEnv(LiberoEnv):
         success_ori_threshold   radians (e.g. 0.2  ≈ 11 degrees)
     """
 
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, encoder=None):
         self.target_pos  = np.zeros(3)   # EEF xyz
         self.target_quat = np.array([1.0, 0.0, 0.0, 0.0])  # EEF quaternion (w,x,y,z)
         self.target_latent = None  # for level 3
-        super().__init__(cfg)
+        super().__init__(cfg, encoder=encoder)
 
     def _make_bddl(self) -> str:
         return write_arm_bddl()
@@ -467,8 +471,8 @@ class LiberoArmEnv(LiberoEnv):
 
         return obs
 
-    def check_custom_success(self, obs, level) -> SuccessInfo:
-        if level in (1,2):
+    def check_custom_success(self, obs, z) -> SuccessInfo:
+        if self.cfg.level in (1,2):
             # --- position ---
             eef_pos = obs.get("robot0_eef_pos")
             if eef_pos is None:
@@ -490,7 +494,11 @@ class LiberoArmEnv(LiberoEnv):
             )
         else:
             # For level 3, success is determined by proximity in latent space.
-            pos_err = float(np.linalg.norm(np.array(obs) - self.target_latent))
+            if self.target_latent is None:
+                return SuccessInfo(success=False, pos_err=float("inf"), ori_err=float("inf"))
+            logger.info("z: %s", z)
+            logger.info("target_latent: %s", self.target_latent)
+            pos_err = float(np.linalg.norm(z - self.target_latent))
             ori_err = 0.0  # orientation not checked for level 3
             success = pos_err < self.cfg.env.success_latent_threshold 
 

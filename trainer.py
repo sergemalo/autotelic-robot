@@ -62,11 +62,9 @@ class Trainer:
         set_global_seed(cfg.seed)
 
         # ---- Components ---------------------------------------------
-        #self.env = LiberoEnv(cfg)
-        self.env = _ENV_CLASSES[cfg.env.name](cfg)
-        #self.env = hydra.utils.instantiate(cfg.env, cfg=cfg)
-
         self.encoder: BaseEncoder = make_encoder(cfg, self.device)
+
+        self.env = _ENV_CLASSES[cfg.env.name](cfg, encoder=self.encoder)
 
         #if(cfg.encoder.name == "vae"):
         #    cfg.reward = 'latent'
@@ -147,16 +145,15 @@ class Trainer:
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
 
             # ---- Select action ---------------------------------------
+            logger.info("Z shape: %s", z.shape)
+            logger.info("Z_goal shape: %s", z_goal.shape)
             action = self.agent.select_action(z, z_goal, deterministic=False)
 
             # ---- Step environment ------------------------------------
-            next_obs, _libero_reward, done, info = self.env.step(action)
+            next_obs, z_next, _libero_reward, done, info = self.env.step(action)
             success = info['success_info'].success
             pos_err = info['success_info'].pos_err
             ori_err = info['success_info'].ori_err
-
-            # ---- Encode next obs -------------------------------------
-            z_next = self.encoder.encode(self._single_obs(next_obs)[self.cfg.encoder.camera_key])
 
             # ---- Compute reward --------------------------------------
             reward = self.reward_fn.compute(
@@ -208,9 +205,9 @@ class Trainer:
             # ---- Episode end ----------------------------------------
             if done:
                 if self.cfg.level == 3:
-                    self.goal_ds._update_intrinsic_motivation(self._module_idx, self.env.check_custom_success(z, level=3))
+                    self.goal_ds._update_intrinsic_motivation(self._module_idx, success)
                 else:
-                    self.goal_ds._update_intrinsic_motivation(self._module_idx, self.env.check_custom_success(obs, level=self.cfg.level))
+                    self.goal_ds._update_intrinsic_motivation(self._module_idx, success)
                     
                 self.buffer.end_episode()
 
@@ -355,7 +352,7 @@ class Trainer:
 
                 z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
                 action = self.agent.select_action(z, z_goal, deterministic=True)
-                next_obs, _, done, info = self.env.step(action)
+                next_obs, z_next, _, done, info = self.env.step(action)
                 success = info['success_info'].success
                 pos_err = info['success_info'].pos_err
                 ori_err = info['success_info'].ori_err
@@ -365,7 +362,7 @@ class Trainer:
                     next_obs=next_obs,
                     goal_obs=goal_obs,
                     z=z,
-                    z_next=self.encoder.encode(self._single_obs(next_obs)[self.cfg.encoder.camera_key]),
+                    z_next=z_next,
                     z_goal=z_goal,
                 )
                 ep_return += r
@@ -593,7 +590,9 @@ class Trainer:
         if self.cfg.level in (1, 2) or goal_split_origin == 'eval': 
             z_goal = self.encoder.encode(self._goal.image)
         else:
-            z_goal = self._goal.latent_representation
+            z_goal = torch.tensor(self._goal.latent_representation, dtype=torch.float32).unsqueeze(0).to(self.device)  # (1, latent_dim)
+
+        return z_goal
 
     def _update(self) -> dict:
         """Sample from buffer and perform one SAC update."""
@@ -653,11 +652,10 @@ class Trainer:
 
         for _ in tqdm(range(self.cfg.agent.warmup_steps)):
             action = np.random.uniform(-1, 1, size=self.env.action_dim)
-            next_obs, _, done, _ = self.env.step(action)
+            next_obs, z_next, _, done, _ = self.env.step(action)
 
             # Dummy zero reward during warmup — buffer is just being seeded
             z = self.encoder.encode(self._single_obs(obs)[self.cfg.encoder.camera_key])
-            z_next = self.encoder.encode(self._single_obs(next_obs)[self.cfg.encoder.camera_key])
             
             self.buffer.push(
                 obs=obs,
