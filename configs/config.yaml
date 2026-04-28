@@ -1,6 +1,6 @@
 defaults:
-  - encoder: r3m
-  - reward: privileged_arm # mettre 'latent' si encoder est VAE
+  - encoder: vae  
+  - reward: latent # mettre 'latent' si encoder est VAE
   - agent: sac
   - replay_buffer: default
   - env: libero_arm
@@ -14,12 +14,12 @@ device: cuda
 output_dir: ${hydra:runtime.output_dir}
 
 training:
-  total_env_steps: 100000
+  total_env_steps: 1000
   checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
   checkpoint_freq: 20000      # save every N env steps
   valid:
-    eval_freq: 10000             # eval every N env steps
-    eval_episodes: 5
+    eval_freq: 500             # eval every N env steps
+    eval_episodes: 1
 
 eval:
   checkpoint_path: L1_latent_sac_step_20000.pt        # path to checkpoint to evaluate
@@ -27,4 +27,4 @@ eval:
 # logging
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
 
-level: 2
+level: 3
