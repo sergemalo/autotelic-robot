@@ -38,6 +38,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 from omegaconf import DictConfig
+import torch
 from tqdm import tqdm
 
 from .goals_dataset import GoalSample
@@ -136,6 +137,7 @@ class StaticArmGoalsDataset:
 
         self._eval_goals  = self._build_goals(images, eef_pos, eef_quat, obs_dicts, eval_idx,  "eval")
 
+
         logger.info("Dataset loaded. train=%d  eval=%d", self.n_train, self.n_eval)
 
         if self.cfg.level in (2, 3):
@@ -192,7 +194,7 @@ class StaticArmGoalsDataset:
                 image=None,           # uint8 (H, W, 3)
                 position=None,
                 quat=None,
-                latent_representation=latent_goal
+                latent_representation = torch.tensor(latent_goal, dtype=torch.float32).to(self.cfg.device)
             )
             goals.append(goal)
         return goals

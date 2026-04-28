@@ -234,12 +234,12 @@ class Trainer:
                 )
 
                 # Log goal vs achieved images periodically
-                self.wandb.log_images(
-                    step=self.total_steps,
-                    goal_image=self._goal.image[::-1],
-                    achieved_image=next_obs.get(self.cfg.encoder.camera_key)[::-1],
-                )
-
+                if self.cfg.level != 3:
+                    self.wandb.log_images(
+                        step=self.total_steps,
+                        goal_image=self._goal.image[::-1],
+                        achieved_image=next_obs[self.cfg.encoder.camera_key][::-1],
+                    )
                 # Reset for next episode
                 self.episode_num += 1
 
@@ -334,7 +334,7 @@ class Trainer:
             
             z_goal = self._get_z_goal(goal, goal_split_origin='eval')
             
-            obs = self.reset_env(goal = self._goal, z_goal = z_goal)
+            obs = self.reset_env(goal = goal, z_goal = z_goal)
             goal_obs = goal.obs
             ep_return = 0.0
             done = False
@@ -579,7 +579,7 @@ class Trainer:
 
     def reset_env(self, goal = None, z_goal = None):
         if self.cfg.level == 3:
-            obs = self.env.reset(latent_goal = goal)
+            obs = self.env.reset(latent_goal = goal.latent_representation)
         else:
             obs = self.env.reset(goal_coordinates = goal.position, goal_quat=goal.quat)
         return obs
@@ -588,9 +588,9 @@ class Trainer:
 
     def _get_z_goal(self, goal: GoalSample, goal_split_origin = 'train'):        
         if self.cfg.level in (1, 2) or goal_split_origin == 'eval': 
-            z_goal = self.encoder.encode(self._goal.image)
+            z_goal = self.encoder.encode(goal.image)
         else:
-            z_goal = torch.tensor(self._goal.latent_representation, dtype=torch.float32).unsqueeze(0).to(self.device)  # (1, latent_dim)
+            z_goal = goal.latent_representation.unsqueeze(0)  # add batch dim
 
         return z_goal
 
@@ -604,7 +604,7 @@ class Trainer:
         use_relabeled_gpu = torch.BoolTensor(use_relabeled).to(self.device)
 
 
-         # Only recompute rewards for relabeled transitions
+        # Only recompute rewards for relabeled transitions
         if use_relabeled.any():
             if self.cfg.reward.name in ("privileged_obj", "privileged_arm"):
                 relabeled_rewards = self.reward_fn.compute_batch(

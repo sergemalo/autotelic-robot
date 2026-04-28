@@ -10,6 +10,7 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
+import torch
 
 import numpy as np
 from omegaconf import DictConfig
@@ -498,7 +499,7 @@ class LiberoArmEnv(LiberoEnv):
                 return SuccessInfo(success=False, pos_err=float("inf"), ori_err=float("inf"))
             logger.info("z: %s", z)
             logger.info("target_latent: %s", self.target_latent)
-            pos_err = float(np.linalg.norm(z - self.target_latent))
+            pos_err = torch.linalg.norm(z - self.target_latent).cpu().item()
             ori_err = 0.0  # orientation not checked for level 3
             success = pos_err < self.cfg.env.success_latent_threshold 
 
