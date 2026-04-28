@@ -145,8 +145,6 @@ class Trainer:
             #logger.info(f"Step {self.total_steps} | Episode {self.episode_num} | Episode steps {episode_steps} | Return so far {episode_return:.3f}")
 
             # ---- Select action ---------------------------------------
-            logger.info("Z shape: %s", z.shape)
-            logger.info("Z_goal shape: %s", z_goal.shape)
             action = self.agent.select_action(z, z_goal, deterministic=False)
 
             # ---- Step environment ------------------------------------
