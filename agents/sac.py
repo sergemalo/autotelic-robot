@@ -152,6 +152,7 @@ class SACAgent:
         )
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
         metrics.update(metrics_c)
 
@@ -159,6 +160,7 @@ class SACAgent:
         actor_loss, alpha_loss, metrics_a = self._actor_alpha_loss(z, z_goal)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
 
         # ---- Alpha update ------------------------------------

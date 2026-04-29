@@ -62,7 +62,7 @@ class LatentReward(BaseReward):
             dist = torch.norm(z_next - z_goal, dim=-1, keepdim=True)
             if self.normalize_distance:
                 if self.distance_norm == "sqrt_latent_dim":
-                    denom = max(float(z_next.shape[-1]) ** 0.5, 1e-8)
+                    denom = max(2 * float(z_next.shape[-1]) ** 0.5, 1e-8)
                     dist = dist / denom
                 else:
                     raise ValueError(f"Unknown distance_norm: {self.distance_norm}")
