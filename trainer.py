@@ -189,6 +189,9 @@ class Trainer:
             obs = next_obs
             z = z_next
 
+            self.wandb.log_scalar({"ep_step": episode_steps, 
+                                   "reward": reward}, step=self.total_steps)
+
             # ---- SAC update -----------------------------------------
             
             #logger.info("SAC update")
@@ -323,6 +326,7 @@ class Trainer:
 
         successes, returns, distances = [], [], []
 
+        #cur_total_eval_step = 0
         for ep in range(num_episodes):
             # ---- Get goal for this episode --------------------------
             if execution_type == "train":
@@ -363,8 +367,12 @@ class Trainer:
                     z_next=z_next,
                     z_goal=z_goal,
                 )
+                #self.wandb.log_scalar({"eval/ep_step": ep_step, 
+                #                        "eval/reward": r},
+                #                        step=self.total_steps + cur_total_eval_step)  # Use global step + episode step for logging during eval
                 ep_return += r
                 ep_step += 1
+                #cur_total_eval_step += 1
 
                 # Capture frame after reward is known so overlay values are current
                 raw_frame = obs[self.cfg.encoder.camera_key][::-1].copy()

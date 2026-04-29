@@ -267,6 +267,8 @@ class StaticArmGoalsDataset:
 
 
     def _update_intrinsic_motivation(self, module_idx: int, result: float):
+        if self.cfg.level == 1:
+            return  # No intrinsic motivation for level 1
         results = self._results_queues[module_idx]
         results.append(result)
        
