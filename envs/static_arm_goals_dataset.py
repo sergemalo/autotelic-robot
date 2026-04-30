@@ -38,6 +38,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 from omegaconf import DictConfig
+import torch
 from tqdm import tqdm
 
 from .goals_dataset import GoalSample
@@ -72,8 +73,11 @@ class StaticArmGoalsDataset:
         self.n_total = 0
         self.n_train = 0
         self.n_eval  = 0
+        self.modules = [] # To store pre-computed modules for level 2
+        self.modularized_goals = [] # To store the indices of goals belonging to each module
         self._results_queues: List = []  # For tracking results for each goal
         self._lps: List = []  # For tracking learning progress for each goal
+
 
     # ------------------------------------------------------------------
     # Loading
@@ -123,10 +127,44 @@ class StaticArmGoalsDataset:
         )
 
         # --- Build GoalSample lists ---
-        self._train_goals = self._build_goals(images, eef_pos, eef_quat, obs_dicts, train_idx, "train")
+        if self.cfg.level in (1, 2):
+            self._train_goals = self._build_goals(images, eef_pos, eef_quat, obs_dicts, train_idx, "train")
+        elif self.cfg.level == 3:
+            latent_data_path = self.cfg.goals.latent_dataset_path
+            latent_data = np.load(latent_data_path, allow_pickle=True)
+            # build goals from latent_data
+            self._train_goals = self._build_latent_goals(latent_data['latent_train_subset']) # build goals from latent_data
+
         self._eval_goals  = self._build_goals(images, eef_pos, eef_quat, obs_dicts, eval_idx,  "eval")
 
+
         logger.info("Dataset loaded. train=%d  eval=%d", self.n_train, self.n_eval)
+
+        if self.cfg.level in (2, 3):
+            self.load_modules()
+
+    def load_modules(self):
+        # Load pre-computed modules for level 2 and level 3 from files
+
+        if self.cfg.level == 2:
+            self.modules_info = np.load("intrinsic_motivation/modules_l2.npz")  # contains 'centroids' and 'cluster_labels'
+        elif self.cfg.level == 3:
+            self.modules_info = np.load("intrinsic_motivation/modules_l3.npz") 
+
+        self.modules = self.modules_info['centroids']  # (n_modules, 7)
+        
+        for module_idx in range(len(self.modules)):
+            self._results_queues.append([])  # Initialize empty results queue for each module
+            self._lps.append(0.0)  # Initialize LP for each module to 0.0
+
+            self.modularized_goals.append([])  # Initialize empty list for this module
+            for goal_idx, label in enumerate(self.modules_info['cluster_labels']):
+                if label == module_idx:
+                    self.modularized_goals[module_idx].append(goal_idx)  # Indices of goals in this module
+
+
+
+
 
     def _build_goals(
         self,
@@ -144,6 +182,19 @@ class StaticArmGoalsDataset:
                 image=images[idx],           # uint8 (H, W, 3)
                 position=eef_pos[idx].astype(np.float32),
                 quat=eef_quat[idx].astype(np.float32),
+            )
+            goals.append(goal)
+        return goals
+
+    def _build_latent_goals(self, latent_data):
+        goals = []
+        for latent_goal in latent_data:
+            goal = GoalSample(
+                obs=None,          # dict[str, np.ndarray]
+                image=None,           # uint8 (H, W, 3)
+                position=None,
+                quat=None,
+                latent_representation = torch.tensor(latent_goal, dtype=torch.float32).to(self.cfg.device)
             )
             goals.append(goal)
         return goals
@@ -177,34 +228,54 @@ class StaticArmGoalsDataset:
                 "Make sure load() was called and the dataset file is non-empty."
             )
 
-        idx = int(self._sample_rngs[split].integers(0, len(goals)))
+        if split == "eval":
+            idx = np.random.randint(0, len(goals))
+            return self._eval_goals[idx], None  # No module index for eval goals
 
-        #if split == "eval":
-        #    idx = np.random.randint(0, len(goals))
+        elif self.cfg.level in (2,3):  
+            # ===== a fixer pour s'assurer que niveau 1 marche encore
 
-        #else:  # train split: ε-greedy over LP
-        #    N = len(goals)
-        #    lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
+            module_idx = self.sample_module()  # Sample a module index based on LP
+            goal_indices = self.modularized_goals[module_idx]  # Get goal indices for this module
+            goal_idx = np.random.choice(goal_indices)  # Sample a goal index from this module
+            return self._train_goals[goal_idx], module_idx  # Return the sampled goal and its module index
+        else:
+            idx = np.random.randint(0, len(goals))
+            return self._train_goals[idx], None
 
-            # ε-greedy proportional probability matching
-            #eps = self.cfg.goals.epsilon
-            #uniform = np.ones(N) / N
-            #lp_sum = lp_values.sum()
+    def sample_module(self) -> int:
 
-            #if lp_sum == 0:
-            #    probs = uniform  # fallback: all LPs are 0 at the start
-            #else:
-            #    probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
+        N = len(self.modules)  # number of modules
+        lp_values = np.abs(np.array(self._lps))  # |LP_i| for all goals
 
-            #idx = np.random.choice(N, p=probs)
+        # ε-greedy proportional probability matching
+        eps = self.cfg.goals.epsilon
+        uniform = np.ones(N) / N
+        lp_sum = lp_values.sum()
 
-        return goals[idx], idx
+        if lp_sum == 0:
+            probs = uniform  # fallback: all LPs are 0 at the start
+        else:
+            probs = eps * uniform + (1 - eps) * (lp_values / lp_sum)
 
-    def _update_intrinsic_motivation(self, goal_idx: int, result: float):
-        results = self._results_queues[goal_idx]
+        module_idx = np.random.choice(N, p=probs)
+
+        return module_idx
+    
+
+
+
+
+    def _update_intrinsic_motivation(self, module_idx: int, result: float):
+        if self.cfg.level == 1:
+            return  # No intrinsic motivation for level 1
+        results = self._results_queues[module_idx]
         results.append(result)
-        n_eval = len(results)
-        self._lps[goal_idx] = compute_lp(results, n_eval)
+       
+        if len(results) > 20:  # Keep only the most recent 20 results
+            results.pop(0)
+
+        self._lps[module_idx] = compute_lp(results)
 
     # ------------------------------------------------------------------
     # Convenience accessors

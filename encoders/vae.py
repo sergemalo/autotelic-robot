@@ -112,6 +112,7 @@ class VAEEncoder(BaseEncoder):
        
         return reconstructions.view(reconstructions.size(0), 3, self._vae_imgsize, self._vae_imgsize)
 
+    @torch.no_grad()
     def encode(self, np_img: Dict[str, np.ndarray]) -> torch.Tensor:
         """
         Returns the posterior mean (no noise) — used for policy/reward.

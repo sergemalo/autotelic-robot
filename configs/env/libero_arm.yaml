@@ -10,3 +10,4 @@ episode_length: 150
 # Success requires BOTH conditions to be true simultaneously.
 success_pos_threshold: 0.05      # metres     (~5 cm)
 success_ori_threshold: 0.2       # radians    (~11 degrees)
+success_latent_threshold: 0.05
