@@ -77,6 +77,7 @@ pip install "hydra-core>=1.2,<1.4" omegaconf
 pip install transformers==4.37.2 accelerate sentencepiece
 pip install ipykernel jupyter
 pip install minigrid
+pip install dill
 pip install -U --force-reinstall --no-cache-dir numpy matplotlib scipy opencv-python
 pip install -e .
 
